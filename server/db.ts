@@ -1,4 +1,4 @@
-import { eq, desc, and, like, or, sql } from "drizzle-orm";
+import { eq, desc, and, like, or, sql, gt, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -10,6 +10,8 @@ import {
   salesReps,
   reminderSettings,
   proposals,
+  passwordResetTokens,
+  auditLogs,
   Contact,
   InsertContact,
   Interaction,
@@ -24,6 +26,8 @@ import {
   InsertReminderSettings,
   Proposal,
   InsertProposal,
+  AuditLog,
+  InsertAuditLog,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { notifyOwner } from './_core/notification';
@@ -50,7 +54,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   const values: InsertUser = { openId: user.openId };
   const updateSet: Record<string, unknown> = {};
 
-  const textFields = ["name", "email", "loginMethod"] as const;
+  const textFields = ["name", "email", "loginMethod", "passwordHash", "twoFactorSecret"] as const;
   textFields.forEach((field) => {
     const val = user[field];
     if (val !== undefined) {
@@ -59,6 +63,22 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     }
   });
 
+  if (user.salesRepId !== undefined) {
+    values.salesRepId = user.salesRepId;
+    updateSet.salesRepId = user.salesRepId;
+  }
+  if (user.twoFactorEnabled !== undefined) {
+    values.twoFactorEnabled = user.twoFactorEnabled;
+    updateSet.twoFactorEnabled = user.twoFactorEnabled;
+  }
+  if (user.failedLoginAttempts !== undefined) {
+    values.failedLoginAttempts = user.failedLoginAttempts;
+    updateSet.failedLoginAttempts = user.failedLoginAttempts;
+  }
+  if (user.lockedUntil !== undefined) {
+    values.lockedUntil = user.lockedUntil;
+    updateSet.lockedUntil = user.lockedUntil;
+  }
   if (user.lastSignedIn !== undefined) {
     values.lastSignedIn = user.lastSignedIn;
     updateSet.lastSignedIn = user.lastSignedIn;
@@ -82,6 +102,143 @@ export async function getUserByOpenId(openId: string) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result[0];
+}
+
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, email.toLowerCase().trim())).limit(1);
+  return result[0];
+}
+
+export async function registerLocalUser(data: {
+  name: string;
+  email: string;
+  passwordHash: string;
+  role?: "user" | "admin";
+  salesRepId?: number;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const normalizedEmail = data.email.toLowerCase().trim();
+  const openId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const userCount = await db.select({ count: sql<number>`count(*)` }).from(users);
+  const isFirst = (userCount[0]?.count || 0) === 0;
+
+  await db.insert(users).values({
+    openId,
+    name: data.name.trim(),
+    email: normalizedEmail,
+    passwordHash: data.passwordHash,
+    loginMethod: "password",
+    role: data.role || (isFirst ? "admin" : "user"),
+    salesRepId: data.salesRepId || null,
+    failedLoginAttempts: 0,
+    lastSignedIn: new Date(),
+  });
+
+  return await getUserByOpenId(openId);
+}
+
+export async function updateUserSecurity(userId: number, patch: {
+  passwordHash?: string;
+  twoFactorSecret?: string | null;
+  twoFactorEnabled?: boolean;
+  role?: "user" | "admin";
+  salesRepId?: number | null;
+  failedLoginAttempts?: number;
+  lockedUntil?: Date | null;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(users).set(patch).where(eq(users.id, userId));
+  return await getUserById(userId);
+}
+
+// Bloqueio Automático por Tentativas Incorretas (5 tentativas = 15 minutos de bloqueio)
+export async function recordFailedLogin(user: typeof users.$inferSelect) {
+  const db = await getDb();
+  if (!db) return;
+
+  const attempts = (user.failedLoginAttempts || 0) + 1;
+  let lockedUntil: Date | null = null;
+
+  if (attempts >= 5) {
+    lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+  }
+
+  await db.update(users).set({
+    failedLoginAttempts: attempts,
+    lockedUntil,
+  }).where(eq(users.id, user.id));
+
+  return { attempts, isLocked: attempts >= 5, lockedUntil };
+}
+
+export async function resetFailedLoginAttempts(userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({
+    failedLoginAttempts: 0,
+    lockedUntil: null,
+  }).where(eq(users.id, userId));
+}
+
+// Logs de Auditoria
+export async function createAuditLog(entry: InsertAuditLog) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(auditLogs).values(entry);
+}
+
+export async function getAuditLogs(limit: number = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit);
+}
+
+// Password Reset Tokens
+export async function createPasswordResetToken(userId: number, tokenHash: string, expiresAt: Date) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return await db.insert(passwordResetTokens).values({
+    userId,
+    tokenHash,
+    expiresAt,
+  });
+}
+
+export async function getValidPasswordResetToken(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const now = new Date();
+  const rows = await db
+    .select()
+    .from(passwordResetTokens)
+    .where(
+      and(
+        eq(passwordResetTokens.tokenHash, tokenHash),
+        isNull(passwordResetTokens.usedAt),
+        gt(passwordResetTokens.expiresAt, now)
+      )
+    )
+    .limit(1);
+  return rows[0];
+}
+
+export async function markPasswordResetTokenUsed(tokenId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, tokenId));
 }
 
 // Contacts CRM Queries
@@ -214,7 +371,6 @@ export async function getProposalsByContact(contactId: number) {
 export async function createProposal(data: InsertProposal) {
   const db = await getDb();
   if (!db) return undefined;
-  // Atualiza automaticamente a etapa para 'proposta_enviada' se ainda estiver em etapas anteriores
   await db
     .update(contacts)
     .set({
@@ -246,7 +402,7 @@ export async function createInteraction(data: InsertInteraction) {
 }
 
 // Tasks
-export async function getTasks(contactId?: number) {
+export async function getTasks(contactId?: number, assignedRepId?: number) {
   const db = await getDb();
   if (!db) return [];
 
@@ -390,7 +546,6 @@ export async function getDashboardStats(viewRepId?: number) {
     stageCounts[c.pipelineStage] = (stageCounts[c.pipelineStage] || 0) + 1;
     stateCounts[c.state] = (stateCounts[c.state] || 0) + 1;
 
-    // Normalização simplificada de segmentos agrícolas
     let segKey = "Outros Segmentos";
     const s = (c.segment || "").toLowerCase();
     const act = (c.activity || "").toLowerCase();

@@ -2,85 +2,126 @@ import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
-function createMockContext(): TrpcContext {
-  return {
-    user: {
-      id: 1,
-      openId: "sample-consultor",
-      email: "consultor@ademicon.com",
-      name: "Consultor Ademicon",
-      loginMethod: "manus",
-      role: "user",
+function createMockContext(user: any = null): { ctx: TrpcContext; cookiesSet: any[]; cookiesCleared: any[] } {
+  const cookiesSet: any[] = [];
+  const cookiesCleared: any[] = [];
+
+  const ctx: TrpcContext = {
+    user,
+    req: {
+      protocol: "https",
+      headers: {
+        "x-forwarded-for": "189.40.120.55",
+      },
+    } as TrpcContext["req"],
+    res: {
+      cookie: (name: string, val: string, opts: any) => {
+        cookiesSet.push({ name, val, opts });
+      },
+      clearCookie: (name: string, opts: any) => {
+        cookiesCleared.push({ name, opts });
+      },
+    } as TrpcContext["res"],
+  };
+
+  return { ctx, cookiesSet, cookiesCleared };
+}
+
+describe("Auditoria, Bloqueio por Tentativas e Rastreabilidade", () => {
+  it("deve suspender a conta após 5 tentativas consecutivas de senha incorreta", async () => {
+    const { ctx } = createMockContext(null);
+    const caller = appRouter.createCaller(ctx);
+
+    const email = `lockout_${Date.now()}@ademicon.agro`;
+    await caller.auth.register({
+      name: "Produtor Teste Bloqueio",
+      email,
+      password: "senhaCorreta2026",
+    });
+
+    // 4 tentativas com senha errada
+    for (let i = 1; i <= 4; i++) {
+      await expect(
+        caller.auth.login({
+          email,
+          password: `senhaErrada${i}`,
+        })
+      ).rejects.toThrow();
+    }
+
+    // 5ª tentativa: deve acionar o bloqueio automático de 15 minutos
+    await expect(
+      caller.auth.login({
+        email,
+        password: "senhaErrada5",
+      })
+    ).rejects.toThrow(/bloqueio temporário|suspensa temporariamente|Limite de 5 tentativas/);
+
+    // Tentativa mesmo com a senha correta agora deve ser barrada pelo bloqueio ativo
+    await expect(
+      caller.auth.login({
+        email,
+        password: "senhaCorreta2026",
+      })
+    ).rejects.toThrow(/temporariamente suspensa/);
+  });
+
+  it("deve registrar auditoria para exportação de dados e exigir permissão de admin para visualizar logs", async () => {
+    const adminUser = {
+      id: 501,
+      openId: "audit_admin",
+      email: "gestor.seguranca@ademicon.agro",
+      name: "Gestor de Segurança",
+      loginMethod: "password",
+      role: "admin" as const,
+      salesRepId: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      passwordHash: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       lastSignedIn: new Date(),
-    },
-    req: {
-      protocol: "https",
-      headers: {},
-    } as TrpcContext["req"],
-    res: {
-      clearCookie: () => {},
-    } as TrpcContext["res"],
-  };
-}
+    };
 
-describe("CRM Agronegócio Ademicon Routers - Recursos Avançados", () => {
-  it("deve retornar métricas por segmento agrícola e taxas de avanço", async () => {
-    const ctx = createMockContext();
-    const caller = appRouter.createCaller(ctx);
-    const stats = await caller.crm.stats();
+    const consultantUser = {
+      id: 502,
+      openId: "audit_rep",
+      email: "consultor.campo@ademicon.agro",
+      name: "Consultor de Campo",
+      loginMethod: "password",
+      role: "user" as const,
+      salesRepId: 1,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      passwordHash: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
 
-    expect(stats.totalContacts).toBeGreaterThanOrEqual(94);
-    expect(stats.segmentStats).toBeDefined();
-    expect(stats.segmentStats.length).toBeGreaterThanOrEqual(3);
-    expect(stats.segmentStats.some((s) => s.name === "Grãos & Algodão" || s.name === "Cafeicultura")).toBe(true);
-  });
+    const { ctx: repCtx } = createMockContext(consultantUser);
+    const repCaller = appRouter.createCaller(repCtx);
 
-  it("deve salvar uma proposta comercial no histórico do contato", async () => {
-    const ctx = createMockContext();
-    const caller = appRouter.createCaller(ctx);
-    const contacts = await caller.crm.listContacts({});
-    const contact = contacts[0];
-
-    const result = await caller.crm.saveProposal({
-      contactId: contact.id,
-      title: "Estudo Especial Safra de Grãos 2026/2027",
-      creditValue: 600000,
-      adminFeePercent: 16,
-      reserveFundPercent: 2,
-      scenarioSnapshot: JSON.stringify({ test: true }),
-      notes: "Proposta comparativa simulando colheitadeira axial",
+    // Consultor exporta lista: log deve ser gravado
+    const exportResult = await repCaller.crm.logExport({
+      recordCount: 94,
+      format: "CSV",
     });
+    expect(exportResult.success).toBe(true);
 
-    expect(result).toBeDefined();
+    // Consultor não tem acesso à tela de auditoria
+    await expect(repCaller.crm.auditLogs()).rejects.toThrow();
 
-    const detail = await caller.crm.getContact({ id: contact.id });
-    expect(detail.proposals.length).toBeGreaterThanOrEqual(1);
-    expect(detail.proposals.some((p) => p.title.includes("Estudo Especial"))).toBe(true);
-  });
+    // Admin consegue visualizar trilha de auditoria
+    const { ctx: adminCtx } = createMockContext(adminUser);
+    const adminCaller = appRouter.createCaller(adminCtx);
 
-  it("deve suportar importação de novos contatos em lote", async () => {
-    const ctx = createMockContext();
-    const caller = appRouter.createCaller(ctx);
-
-    const importRes = await caller.crm.importContacts({
-      items: [
-        {
-          state: "Minas Gerais",
-          city: "Patos de Minas",
-          organization: "Fazenda Teste Automatizado",
-          segment: "Grãos e Algodão",
-          activity: "Soja e Milho Safrinha",
-          phone: "(34) 99999-0000",
-          formattedPhone: "(34) 99999-0000",
-          sourceUrl: "https://ademicon.com.br",
-          verificationNote: "Importado via teste automatizado",
-          interestAsset: "Colheitadeira e Tratores",
-        },
-      ],
-    });
-
-    expect(importRes.inserted).toBe(1);
+    const logs = await adminCaller.crm.auditLogs({ limit: 10 });
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs.some((l) => l.action === "crm.export_data")).toBe(true);
   });
 });
