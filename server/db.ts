@@ -249,6 +249,8 @@ export async function getContacts(filter?: {
   temperature?: string;
   priority?: string;
   assignedRepId?: number;
+  leadType?: string;
+  leadBatch?: string;
 }) {
   const db = await getDb();
   if (!db) return [];
@@ -283,6 +285,12 @@ export async function getContacts(filter?: {
   }
   if (filter?.assignedRepId) {
     conditions.push(eq(contacts.assignedRepId, filter.assignedRepId));
+  }
+  if (filter?.leadType && filter.leadType !== 'all') {
+    conditions.push(eq(contacts.leadType, filter.leadType));
+  }
+  if (filter?.leadBatch && filter.leadBatch !== 'all') {
+    conditions.push(eq(contacts.leadBatch, filter.leadBatch));
   }
 
   const query = db
@@ -322,7 +330,25 @@ export async function batchInsertContacts(items: InsertContact[]) {
   if (!db || items.length === 0) return { inserted: 0 };
   let count = 0;
   for (const item of items) {
-    await db.insert(contacts).values(item);
+    const payload = {
+      ...item,
+      leadKey: item.leadKey || `${(item.organization || '').toLowerCase().trim()}::${(item.city || '').toLowerCase().trim()}::${(item.state || '').toLowerCase().trim()}`,
+    };
+    await db.insert(contacts).values(payload).onDuplicateKeyUpdate({
+      set: {
+        phone: payload.phone,
+        formattedPhone: payload.formattedPhone,
+        activity: payload.activity,
+        address: payload.address || null,
+        sourceUrl: payload.sourceUrl,
+        verificationNote: payload.verificationNote,
+        leadType: payload.leadType || 'Empresa agrícola',
+        leadSource: payload.leadSource || 'Atualização de Base',
+        leadBatch: payload.leadBatch || 'Base existente',
+        interestAsset: payload.interestAsset || null,
+        updatedAt: new Date(),
+      }
+    });
     count++;
   }
   return { inserted: count };
@@ -519,12 +545,16 @@ export async function getDashboardStats(viewRepId?: number) {
   if (!db) {
     return {
       totalContacts: 0,
-      stageCounts: {},
-      stateCounts: {},
+      stageCounts: {} as Record<string, number>,
+      stateCounts: {} as Record<string, number>,
+      batchCounts: {} as Record<string, number>,
+      leadTypeCounts: {} as Record<string, number>,
       pendingTasks: 0,
       recentInteractions: [],
       repStats: [],
+      repConversionStats: [],
       segmentStats: [],
+      monthlyStats: [],
     };
   }
 
@@ -539,12 +569,18 @@ export async function getDashboardStats(viewRepId?: number) {
 
   const stageCounts: Record<string, number> = {};
   const stateCounts: Record<string, number> = {};
+  const batchCounts: Record<string, number> = {};
+  const leadTypeCounts: Record<string, number> = {};
   const repCounts: Record<number, { assigned: number; qualified: number; closed: number }> = {};
   const segMap: Record<string, { total: number; inProgress: number; closed: number }> = {};
 
   all.forEach((c) => {
     stageCounts[c.pipelineStage] = (stageCounts[c.pipelineStage] || 0) + 1;
     stateCounts[c.state] = (stateCounts[c.state] || 0) + 1;
+    const batchKey = c.leadBatch || "Base existente";
+    batchCounts[batchKey] = (batchCounts[batchKey] || 0) + 1;
+    const ltKey = c.leadType || c.segment || "Empresa agrícola";
+    leadTypeCounts[ltKey] = (leadTypeCounts[ltKey] || 0) + 1;
 
     let segKey = "Outros Segmentos";
     const s = (c.segment || "").toLowerCase();
@@ -599,6 +635,59 @@ export async function getDashboardStats(viewRepId?: number) {
     closedDeals: repCounts[r.id]?.closed || 0,
   }));
 
+  const repConversionStats = repStats.map((r) => ({
+    id: r.id,
+    name: r.name,
+    assignedContacts: r.assignedContacts,
+    qualifiedLeads: r.qualifiedLeads,
+    closedDeals: r.closedDeals,
+    conversionRate: r.assignedContacts > 0 ? Math.round((r.closedDeals / r.assignedContacts) * 100) : 0,
+    qualificationRate: r.assignedContacts > 0 ? Math.round((r.qualifiedLeads / r.assignedContacts) * 100) : 0,
+  }));
+
+  const toMonthKey = (value: Date | string | null | undefined) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
+  const monthNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const now = new Date();
+  const monthWindows = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (5 - index), 1));
+    const key = toMonthKey(date)!;
+    return { key, label: `${monthNames[date.getUTCMonth()]}/${String(date.getUTCFullYear()).slice(-2)}` };
+  });
+  const monthBuckets: Record<string, { newLeads: number; closedDeals: number }> = {};
+  monthWindows.forEach(({ key }) => {
+    monthBuckets[key] = { newLeads: 0, closedDeals: 0 };
+  });
+
+  all.forEach((c) => {
+    const createdKey = toMonthKey(c.createdAt);
+    if (createdKey && monthBuckets[createdKey]) {
+      monthBuckets[createdKey].newLeads += 1;
+    }
+    const closedKey = c.pipelineStage === "fechado" ? toMonthKey(c.updatedAt) : null;
+    if (closedKey && monthBuckets[closedKey]) {
+      monthBuckets[closedKey].closedDeals += 1;
+    }
+  });
+
+  let cumulativeLeads = 0;
+  const monthlyStats = monthWindows.map(({ key, label }) => {
+    const bucket = monthBuckets[key];
+    cumulativeLeads += bucket.newLeads;
+    return {
+      key,
+      label,
+      newLeads: bucket.newLeads,
+      closedDeals: bucket.closedDeals,
+      cumulativeLeads,
+      conversionRate: bucket.newLeads > 0 ? Math.round((bucket.closedDeals / bucket.newLeads) * 100) : 0,
+    };
+  });
+
   const segmentStats = Object.entries(segMap).map(([name, data]) => ({
     name,
     total: data.total,
@@ -612,9 +701,13 @@ export async function getDashboardStats(viewRepId?: number) {
     totalContacts: all.length,
     stageCounts,
     stateCounts,
+    batchCounts,
+    leadTypeCounts,
     pendingTasks: pending.length,
     recentInteractions: recentInt,
     repStats,
+    repConversionStats,
     segmentStats,
+    monthlyStats,
   };
 }

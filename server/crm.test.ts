@@ -125,3 +125,57 @@ describe("Auditoria, Bloqueio por Tentativas e Rastreabilidade", () => {
     expect(logs.some((l) => l.action === "crm.export_data")).toBe(true);
   });
 });
+
+describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
+  it("deve listar leads com filtros por estado, lote de expansão e tipo de lead", async () => {
+    const adminUser = {
+      id: 501,
+      openId: "lead_tester",
+      email: "lead.tester@ademicon.agro",
+      name: "Tester Nacional",
+      loginMethod: "password",
+      role: "admin" as const,
+      salesRepId: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      passwordHash: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
+    const { ctx } = createMockContext(adminUser);
+    const caller = appRouter.createCaller(ctx);
+
+    // 1. Total geral deve conter 183 leads
+    const allLeads = await caller.crm.listContacts({});
+    expect(allLeads.length).toBe(183);
+
+    const stats = await caller.crm.stats({});
+    expect(Object.values(stats.stateCounts).reduce((sum, value) => sum + value, 0)).toBe(183);
+    expect(Object.values(stats.leadTypeCounts).reduce((sum, value) => sum + value, 0)).toBe(183);
+    expect(Array.isArray(stats.repConversionStats)).toBe(true);
+    expect(stats.monthlyStats).toHaveLength(6);
+    expect(stats.monthlyStats.every((month) => typeof month.label === "string" && typeof month.newLeads === "number" && typeof month.closedDeals === "number" && typeof month.cumulativeLeads === "number")).toBe(true);
+    expect(stats.monthlyStats.reduce((sum, month) => sum + month.newLeads, 0)).toBeGreaterThanOrEqual(183);
+
+    // 2. Filtro por lote: Expansão Nacional 2026 deve retornar 88 leads
+    const expansionLeads = await caller.crm.listContacts({ leadBatch: "Expansão Nacional 2026" });
+    expect(expansionLeads.length).toBe(88);
+
+    // 3. Filtro por lote: Base existente deve retornar 95 contatos
+    const baseLeads = await caller.crm.listContacts({ leadBatch: "Base existente" });
+    expect(baseLeads.length).toBe(95);
+
+    // 4. Filtro por estado: deve filtrar corretamente
+    const goiasLeads = await caller.crm.listContacts({ state: "Goiás" });
+    expect(goiasLeads.length).toBeGreaterThan(0);
+    expect(goiasLeads.every(l => l.state === "Goiás")).toBe(true);
+
+    // 5. Filtro por tipo de lead: Usina Sucroenergética
+    const usinas = await caller.crm.listContacts({ leadType: "Usina Sucroenergética" });
+    expect(usinas.length).toBeGreaterThan(0);
+    expect(usinas.every(l => l.leadType === "Usina Sucroenergética")).toBe(true);
+  });
+});
