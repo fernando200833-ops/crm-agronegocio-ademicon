@@ -1385,12 +1385,18 @@ export default function Home() {
                         <div className="p-3 bg-white rounded-lg border border-[#D1CCC1]/70 space-y-2 text-xs">
                           <div className="flex justify-between items-center">
                             <span className="text-[#5C727D] font-medium flex items-center gap-1">
-                              <DollarSign className="w-3.5 h-3.5 text-[#88B04B]" /> Volume em Crédito Cotado:
+                              <DollarSign className="w-3.5 h-3.5 text-[#88B04B]" /> Volume Financeiro Realizado:
                             </span>
                             <span className="font-extrabold text-[#1B4D3E]">
                               {formatBRL(actualAmount)}
                             </span>
                           </div>
+                          {(repStat as any)?.quotedFinancialAmount > actualAmount && (
+                            <div className="flex justify-between items-center text-[11px] text-[#5C727D]">
+                              <span>Volume Cotado em Andamento:</span>
+                              <span className="font-semibold text-[#1A3643]">{formatBRL((repStat as any).quotedFinancialAmount)}</span>
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#D1CCC1]/40">
                             <div>
