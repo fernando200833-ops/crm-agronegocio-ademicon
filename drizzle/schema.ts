@@ -42,6 +42,7 @@ export const salesRepMonthlyTargets = mysqlTable("salesRepMonthlyTargets", {
   salesRepId: int("salesRepId").notNull(),
   monthKey: varchar("monthKey", { length: 7 }).notNull(),
   targetRate: int("targetRate").default(0).notNull(),
+  targetFinancialAmount: decimal("targetFinancialAmount", { precision: 14, scale: 2 }).default("0").notNull(),
   createdByUserId: int("createdByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
