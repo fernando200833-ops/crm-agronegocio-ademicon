@@ -43,11 +43,26 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+
+const chartColors = ['#1B4D3E', '#88B04B', '#D39B39', '#5C727D', '#B96A50', '#6B7F5B', '#8D6E63', '#3F7D7A'];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'contacts' | 'kanban' | 'team' | 'tasks' | 'reminders' | 'templates' | 'audit'>('dashboard');
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState('all');
+  const [leadTypeFilter, setLeadTypeFilter] = useState('all');
+  const [leadBatchFilter, setLeadBatchFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
   const [tempFilter, setTempFilter] = useState('all');
   const [activeRepView, setActiveRepView] = useState('all'); // Carteira selecionada
@@ -79,6 +94,8 @@ export default function Home() {
     pipelineStage: stageFilter !== 'all' ? stageFilter : undefined,
     temperature: tempFilter !== 'all' ? tempFilter : undefined,
     assignedRepId: activeRepView !== 'all' ? parseInt(activeRepView, 10) : undefined,
+    leadType: leadTypeFilter !== 'all' ? leadTypeFilter : undefined,
+    leadBatch: leadBatchFilter !== 'all' ? leadBatchFilter : undefined,
   });
   const tasksQuery = trpc.crm.listTasks.useQuery();
   const templatesQuery = trpc.crm.listTemplates.useQuery();
@@ -233,14 +250,79 @@ export default function Home() {
   };
 
   const states = useMemo(() => {
-    return ['all', 'Minas Gerais', 'Goiás', 'Mato Grosso', 'São Paulo', 'Paraná'];
+    if (!contactsQuery.data) return ['all'];
+    const unique = Array.from(new Set(contactsQuery.data.map(c => c.state))).filter(Boolean).sort();
+    return ['all', ...unique];
+  }, [contactsQuery.data]);
+
+  const leadTypes = useMemo(() => {
+    if (!contactsQuery.data) return ['all'];
+    const unique = Array.from(new Set(contactsQuery.data.map(c => c.leadType || c.segment))).filter(Boolean).sort();
+    return ['all', ...unique];
+  }, [contactsQuery.data]);
+
+  const leadBatches = useMemo(() => {
+    return ['all', 'Expansão Nacional 2026', 'Base existente'];
   }, []);
+
+  const stateChartData = useMemo(() => {
+    return Object.entries(statsQuery.data?.stateCounts || {})
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [statsQuery.data?.stateCounts]);
+
+  const leadTypeChartData = useMemo(() => {
+    return Object.entries(statsQuery.data?.leadTypeCounts || {})
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [statsQuery.data?.leadTypeCounts]);
+
+  const repConversionChartData = useMemo(() => {
+    return (statsQuery.data?.repConversionStats || []).map((rep) => ({
+      ...rep,
+      shortName: rep.name.length > 24 ? `${rep.name.slice(0, 24)}…` : rep.name,
+    }));
+  }, [statsQuery.data?.repConversionStats]);
+
+  const monthlyEvolutionChartData = useMemo(() => {
+    return statsQuery.data?.monthlyStats || [];
+  }, [statsQuery.data?.monthlyStats]);
+
+  const handleStateChartClick = (payload: { name?: string }) => {
+    if (!payload.name) return;
+    setStateFilter(payload.name);
+    setLeadBatchFilter('all');
+    setLeadTypeFilter('all');
+    setActiveTab('contacts');
+    toast.success(`Filtro aplicado: ${payload.name}`);
+  };
+
+  const handleLeadTypeChartClick = (payload: { name?: string }) => {
+    if (!payload.name) return;
+    setLeadTypeFilter(payload.name);
+    setLeadBatchFilter('all');
+    setStateFilter('all');
+    setActiveTab('contacts');
+    toast.success(`Filtro aplicado: ${payload.name}`);
+  };
+
+  const handleRepChartClick = (payload: { id?: number }) => {
+    if (!payload.id) return;
+    setActiveRepView(String(payload.id));
+    setStateFilter('all');
+    setLeadBatchFilter('all');
+    setLeadTypeFilter('all');
+    setStageFilter('all');
+    setActiveTab('contacts');
+    toast.success('Carteira do consultor selecionada');
+  };
 
   // Iniciar conversa direta no WhatsApp
   const handleWhatsAppClick = (phone: string, org: string, city: string, asset?: string | null) => {
     const cleanPhone = phone.replace(/\D/g, '');
     const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-    const text = `Bom dia. Sou consultor autorizado da Ademicon na região de ${city}. Vi que a ${org} atua no agronegócio. Trabalho com planejamento para aquisição de máquinas, caminhões e equipamentos. Posso fazer duas perguntas rápidas para saber se existe algum investimento planejado para a próxima safra?`;
+    const targetItem = asset ? `aquisição e renovação de ${asset.toLowerCase()}` : 'aquisição planejada de máquinas, caminhões e implementos';
+    const text = `Bom dia. Sou consultor autorizado da Ademicon na região de ${city}. Vi que a ${org} atua fortemente no agronegócio regional. Trabalho com planejamento financeiro para ${targetItem} com parcelas estruturadas e sem juros bancários abusivos. Posso fazer duas perguntas rápidas para saber se existe algum investimento previsto para as próximas safras?`;
     window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -251,20 +333,22 @@ export default function Home() {
       return;
     }
 
-    const headers = ['ID', 'Estado', 'Municipio', 'Organizacao', 'Segmento', 'Atividade', 'Telefone', 'Interesse', 'Etapa', 'Consultor_Atribuido'];
+    const headers = ['ID', 'Lote_Origem', 'Estado', 'Municipio', 'Organizacao', 'Tipo_Lead', 'Atividade', 'Telefone', 'Ativo_Consorcio', 'Etapa', 'Consultor_Atribuido', 'Fonte_Oficial'];
     const rows = contactsQuery.data.map(c => {
       const rep = repsQuery.data?.find(r => r.id === c.assignedRepId);
       return [
         c.id,
+        `"${c.leadBatch || 'Base existente'}"`,
         `"${c.state}"`,
         `"${c.city}"`,
         `"${c.organization.replace(/"/g, '""')}"`,
-        `"${c.segment}"`,
+        `"${c.leadType || c.segment}"`,
         `"${c.activity.replace(/"/g, '""')}"`,
         `"${c.formattedPhone}"`,
         `"${c.interestAsset || ''}"`,
         `"${stageLabels[c.pipelineStage] || c.pipelineStage}"`,
-        `"${rep ? rep.name : 'Nenhum'}"`
+        `"${rep ? rep.name : 'Nenhum'}"`,
+        `"${c.sourceUrl || ''}"`
       ].join(';');
     });
 
@@ -433,7 +517,7 @@ export default function Home() {
                 activeTab === 'contacts' ? 'bg-[#88B04B] text-[#1B4D3E]' : 'hover:bg-white/10 text-white/90'
               }`}
             >
-              <Users className="w-4 h-4" /> Contatos ({contactsQuery.data?.length || 0})
+              <Users className="w-4 h-4" /> Base & Leads Nacionais ({contactsQuery.data?.length || 0})
             </button>
             <button
               onClick={() => setActiveTab('kanban')}
@@ -515,7 +599,7 @@ export default function Home() {
         <header className="h-16 bg-white border-b border-[#D1CCC1] flex items-center justify-between px-8 shadow-sm">
           <div className="flex items-center gap-3">
             <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#EBE6DB] text-[#1B4D3E]">
-              {activeRep ? `Carteira: ${activeRep.name}` : 'Base Geral: 5 Estados Agro'}
+              {activeRep ? `Carteira: ${activeRep.name}` : `Base Nacional: 27 UFs (${contactsQuery.data?.length || 183} Leads Agro)`}
             </span>
             <span className="text-xs text-[#5C727D]">
               Perfil: <strong>{meQuery.data?.role === 'admin' ? 'Administrador Geral' : 'Consultor Comercial'}</strong>
@@ -634,43 +718,271 @@ export default function Home() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
                 <Card className="bg-white border-[#D1CCC1]">
                   <CardHeader className="pb-2">
-                    <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Base Cadastrada</CardDescription>
-                    <CardTitle className="text-3xl font-extrabold text-[#1B4D3E]">{statsQuery.data?.totalContacts || 94}</CardTitle>
+                    <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Total de Leads Agro</CardDescription>
+                    <CardTitle className="text-3xl font-extrabold text-[#1B4D3E]">{statsQuery.data?.totalContacts || 183}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-[#5C727D]">Minas, Goiás, Mato Grosso, SP e PR</p>
+                    <p className="text-xs text-[#5C727D]">27 UFs cobertas (Norte a Sul)</p>
                   </CardContent>
                 </Card>
 
                 <Card className="bg-white border-[#D1CCC1]">
                   <CardHeader className="pb-2">
-                    <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Leads em Andamento</CardDescription>
+                    <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Expansão Nacional 2026</CardDescription>
                     <CardTitle className="text-3xl font-extrabold text-[#88B04B]">
-                      {(statsQuery.data?.stageCounts['em_qualificacao'] || 0) + (statsQuery.data?.stageCounts['proposta_enviada'] || 0)}
+                      {statsQuery.data?.batchCounts?.['Expansão Nacional 2026'] || 88}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-[#5C727D]">Em qualificação e propostas</p>
+                    <p className="text-xs text-[#5C727D]">Usinas, cooperativas e pivôs novos</p>
                   </CardContent>
                 </Card>
 
                 <Card className="bg-white border-[#D1CCC1]">
                   <CardHeader className="pb-2">
-                    <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Tarefas Pendentes</CardDescription>
-                    <CardTitle className="text-3xl font-extrabold text-amber-700">{statsQuery.data?.pendingTasks || 0}</CardTitle>
+                    <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Base Inicial Preservada</CardDescription>
+                    <CardTitle className="text-3xl font-extrabold text-[#1A3643]">
+                      {statsQuery.data?.batchCounts?.['Base existente'] || 95}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-[#5C727D]">Follow-ups agendados para a semana</p>
+                    <p className="text-xs text-[#5C727D]">95 contatos de MG, GO, MT, SP e PR</p>
                   </CardContent>
                 </Card>
 
                 <Card className="bg-white border-[#D1CCC1]">
                   <CardHeader className="pb-2">
                     <CardDescription className="text-xs font-bold uppercase tracking-wider text-[#5C727D]">Consultores na Equipe</CardDescription>
-                    <CardTitle className="text-3xl font-extrabold text-[#1B4D3E]">{repsQuery.data?.length || 4}</CardTitle>
+                    <CardTitle className="text-3xl font-extrabold text-[#1B4D3E]">{repsQuery.data?.length || 0}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-[#5C727D]">Distribuição ativa de carteira</p>
+                    <p className="text-xs text-[#5C727D]">Prontos para assumir carteiras</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Gráficos Interativos de Distribuição */}
+              <div className="space-y-6">
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <MapPin className="w-5 h-5 text-[#88B04B]" /> Distribuição por Estado (UF)
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Ranking de leads por unidade federativa cobrindo as 27 UFs. Clique em qualquer barra para abrir a listagem filtrada.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        {stateChartData.length} UFs
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="w-full overflow-x-auto">
+                      {stateChartData.length > 0 ? (
+                          <BarChart
+                            width={920}
+                            height={520}
+                            data={stateChartData}
+                            layout="vertical"
+                            margin={{ top: 8, right: 30, left: 8, bottom: 8 }}
+                            barCategoryGap={6}
+                            onClick={(data: any) => {
+                              const name = data?.activePayload?.[0]?.payload?.name;
+                              handleStateChartClick({ name });
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E7E2D8" />
+                            <XAxis type="number" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                            <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#1A3643', fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <RechartsTooltip
+                              cursor={{ fill: '#F5F2EB' }}
+                              contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                              formatter={(value: any) => [`${value} leads`, 'Quantidade']}
+                            />
+                            <Bar dataKey="value" name="Leads" fill="#1B4D3E" radius={[0, 6, 6, 0]} barSize={15} cursor="pointer" />
+                          </BarChart>
+                      ) : (
+                        <div className="h-[300px] flex items-center justify-center text-sm text-[#5C727D]">Carregando distribuição por UF...</div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <Building className="w-5 h-5 text-[#88B04B]" /> Tipo de Negócio
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Distribuição por segmento de atuação agrícola e industrial. Clique em uma barra para filtrar a base.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        {leadTypeChartData.length} categorias
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="w-full overflow-x-auto">
+                      {leadTypeChartData.length > 0 ? (
+                          <BarChart
+                            width={920}
+                            height={280}
+                            data={leadTypeChartData}
+                            layout="vertical"
+                            margin={{ top: 8, right: 30, left: 16, bottom: 8 }}
+                            barCategoryGap={8}
+                            onClick={(data: any) => {
+                              const name = data?.activePayload?.[0]?.payload?.name;
+                              handleLeadTypeChartClick({ name });
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E7E2D8" />
+                            <XAxis type="number" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                            <YAxis
+                              type="category"
+                              dataKey="name"
+                              width={240}
+                              tick={{ fill: '#1A3643', fontSize: 11, fontWeight: 600 }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <RechartsTooltip
+                              cursor={{ fill: '#F5F2EB' }}
+                              contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                              formatter={(value: any) => [`${value} leads`, 'Quantidade']}
+                            />
+                            <Bar dataKey="value" name="Leads" fill="#88B04B" radius={[0, 6, 6, 0]} barSize={18} cursor="pointer" />
+                          </BarChart>
+                      ) : (
+                        <div className="h-[280px] flex items-center justify-center text-sm text-[#5C727D]">Carregando tipos de negócio...</div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Gráficos de Conversão e Evolução */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <UserCheck className="w-5 h-5 text-[#88B04B]" /> Conversão por Consultor
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Percentual de contratos fechados sobre a carteira atribuída. Clique em uma barra para abrir a carteira do consultor.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        {repConversionChartData.length} consultores
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {repConversionChartData.length > 0 ? (
+                      <div className="w-full overflow-x-auto">
+                        <BarChart
+                          width={560}
+                          height={320}
+                          data={repConversionChartData}
+                          layout="vertical"
+                          margin={{ top: 8, right: 30, left: 8, bottom: 8 }}
+                          barCategoryGap={14}
+                          onClick={(data: any) => {
+                            const id = data?.activePayload?.[0]?.payload?.id;
+                            handleRepChartClick({ id });
+                          }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E7E2D8" />
+                          <XAxis
+                            type="number"
+                            domain={[0, 100]}
+                            allowDecimals={false}
+                            tickFormatter={(value) => `${value}%`}
+                            tick={{ fill: '#5C727D', fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="shortName"
+                            width={150}
+                            tick={{ fill: '#1A3643', fontSize: 11, fontWeight: 600 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <RechartsTooltip
+                            cursor={{ fill: '#F5F2EB' }}
+                            contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                            formatter={(value: any, name: any) => {
+                              if (name === 'Conversão') return [`${value}%`, 'Conversão'];
+                              return [value, name];
+                            }}
+                            labelFormatter={(_, payload) => payload?.[0]?.payload?.name || ''}
+                          />
+                          <Bar dataKey="conversionRate" name="Conversão" fill="#1B4D3E" radius={[0, 6, 6, 0]} barSize={22} cursor="pointer" />
+                        </BarChart>
+                      </div>
+                    ) : (
+                      <div className="h-[320px] rounded-lg border border-dashed border-[#D1CCC1] bg-[#F5F2EB]/40 flex flex-col items-center justify-center text-center px-6">
+                        <UserPlus className="w-8 h-8 text-[#88B04B] mb-3" />
+                        <p className="font-bold text-[#1B4D3E]">Nenhum consultor cadastrado</p>
+                        <p className="text-xs text-[#5C727D] mt-1 max-w-sm">Cadastre membros em “Equipe Comercial” e atribua as carteiras para acompanhar a conversão individual.</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <TrendingUp className="w-5 h-5 text-[#88B04B]" /> Evolução Mensal
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Novos leads, fechamentos e crescimento acumulado da base nos últimos seis meses.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        6 meses
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {monthlyEvolutionChartData.length > 0 ? (
+                      <div className="w-full overflow-x-auto">
+                        <ComposedChart
+                          width={560}
+                          height={320}
+                          data={monthlyEvolutionChartData}
+                          margin={{ top: 8, right: 18, left: 0, bottom: 8 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E7E2D8" />
+                          <XAxis dataKey="label" tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis yAxisId="left" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip
+                            contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                            formatter={(value: any, name: any) => [value, name]}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 11, color: '#1A3643' }} />
+                          <Bar yAxisId="left" dataKey="newLeads" name="Novos leads" fill="#88B04B" radius={[5, 5, 0, 0]} barSize={24} />
+                          <Line yAxisId="left" type="monotone" dataKey="closedDeals" name="Fechados" stroke="#D39B39" strokeWidth={3} dot={{ r: 4, fill: '#D39B39' }} />
+                          <Line yAxisId="right" type="monotone" dataKey="cumulativeLeads" name="Base acumulada" stroke="#1B4D3E" strokeWidth={3} dot={{ r: 4, fill: '#1B4D3E' }} />
+                        </ComposedChart>
+                      </div>
+                    ) : (
+                      <div className="h-[320px] flex items-center justify-center text-sm text-[#5C727D]">Carregando evolução mensal...</div>
+                    )}
+                    <p className="text-[11px] text-[#5C727D] mt-1">Fechamentos usam o mês da última atualização do lead enquanto o CRM não possui uma data de fechamento dedicada.</p>
                   </CardContent>
                 </Card>
               </div>
@@ -726,30 +1038,113 @@ export default function Home() {
             <div className="space-y-6 max-w-7xl mx-auto">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                  <h2 className="text-3xl font-extrabold text-[#1B4D3E]">Base de Produtores e Empresas</h2>
+                  <h2 className="text-3xl font-extrabold text-[#1B4D3E]">Base & Leads Nacionais do Agronegócio</h2>
                   <p className="text-sm text-[#5C727D]">
-                    {activeRep ? `Exibindo contatos atribuídos a ${activeRep.name}` : 'Contatos públicos levantados com telefones verificados e foco em consórcio'}
+                    {activeRep ? `Exibindo contatos atribuídos a ${activeRep.name}` : '183 empresas agrícolas, fazendas e usinas de todo o Brasil com canais comerciais e telefones verificados'}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-[#5C727D]">Filtrar Estado:</span>
-                  <select
-                    value={stateFilter}
-                    onChange={(e) => setStateFilter(e.target.value)}
-                    className="bg-white border border-[#D1CCC1] rounded-lg text-xs p-2 text-[#1A3643] focus:outline-none"
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleExportCSV}
+                    className="border-[#1B4D3E] text-[#1B4D3E] hover:bg-[#F5F2EB]"
                   >
-                    {states.map(s => (
-                      <option key={s} value={s}>{s === 'all' ? 'Todos os Estados' : s}</option>
-                    ))}
-                  </select>
+                    <Download className="w-4 h-4 mr-1.5" /> Exportar CSV Rastreável
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="bg-[#1B4D3E] text-white hover:bg-[#1B4D3E]/90"
+                  >
+                    <Upload className="w-4 h-4 mr-1.5" /> Importar Planilha
+                  </Button>
                 </div>
+              </div>
+
+              {/* Barra de Filtros Avançados */}
+              <div className="bg-white rounded-xl border border-[#D1CCC1] p-4 shadow-sm space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#5C727D] block mb-1">Origem / Lote:</label>
+                    <select
+                      value={leadBatchFilter}
+                      onChange={(e) => setLeadBatchFilter(e.target.value)}
+                      className="w-full bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-lg text-xs p-2 text-[#1A3643] focus:outline-none"
+                    >
+                      <option value="all">Todos os Lotes (183 Leads)</option>
+                      <option value="Expansão Nacional 2026">Expansão Nacional 2026 (88 Novos)</option>
+                      <option value="Base existente">Base Inicial Preservada (95 Contatos)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#5C727D] block mb-1">Estado (UF):</label>
+                    <select
+                      value={stateFilter}
+                      onChange={(e) => setStateFilter(e.target.value)}
+                      className="w-full bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-lg text-xs p-2 text-[#1A3643] focus:outline-none"
+                    >
+                      {states.map(s => (
+                        <option key={s} value={s}>{s === 'all' ? 'Todos os Estados (27 UFs)' : s}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#5C727D] block mb-1">Tipo de Lead / Segmento:</label>
+                    <select
+                      value={leadTypeFilter}
+                      onChange={(e) => setLeadTypeFilter(e.target.value)}
+                      className="w-full bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-lg text-xs p-2 text-[#1A3643] focus:outline-none"
+                    >
+                      {leadTypes.map(lt => (
+                        <option key={lt} value={lt}>{lt === 'all' ? 'Todos os Tipos' : lt}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#5C727D] block mb-1">Etapa no Funil:</label>
+                    <select
+                      value={stageFilter}
+                      onChange={(e) => setStageFilter(e.target.value)}
+                      className="w-full bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-lg text-xs p-2 text-[#1A3643] focus:outline-none"
+                    >
+                      <option value="all">Todas as Etapas</option>
+                      {Object.entries(stageLabels).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {(stateFilter !== 'all' || leadTypeFilter !== 'all' || leadBatchFilter !== 'all' || stageFilter !== 'all' || search) && (
+                  <div className="flex justify-between items-center pt-2 border-t border-[#D1CCC1]/40 text-xs">
+                    <span className="text-[#5C727D]">
+                      Filtros ativos: {contactsQuery.data?.length || 0} registro(s) encontrado(s)
+                    </span>
+                    <button
+                      onClick={() => {
+                        setStateFilter('all');
+                        setLeadTypeFilter('all');
+                        setLeadBatchFilter('all');
+                        setStageFilter('all');
+                        setSearch('');
+                      }}
+                      className="text-amber-800 hover:underline font-semibold"
+                    >
+                      Limpar Filtros
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white rounded-xl border border-[#D1CCC1] p-4 shadow-sm space-y-4">
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-3 text-[#5C727D]" />
                   <Input
-                    placeholder="Pesquisar por produtor, município, segmento ou telefone..."
+                    placeholder="Pesquisar por nome da empresa, fazenda, usina, município, cultura ou telefone..."
                     className="pl-9 bg-[#F5F2EB]/50 border-[#D1CCC1]"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
@@ -760,9 +1155,10 @@ export default function Home() {
                   <table className="w-full text-sm text-left">
                     <thead className="bg-[#F5F2EB] text-[#5C727D] text-xs uppercase tracking-wider">
                       <tr>
-                        <th className="py-3 px-4 font-semibold">Organização / Produtor</th>
+                        <th className="py-3 px-4 font-semibold">Organização / Usina / Fazenda</th>
                         <th className="py-3 px-4 font-semibold">Localização</th>
-                        <th className="py-3 px-4 font-semibold">Segmento / Cultura</th>
+                        <th className="py-3 px-4 font-semibold">Tipo & Origem</th>
+                        <th className="py-3 px-4 font-semibold">Ativo Recomendado (Consórcio)</th>
                         <th className="py-3 px-4 font-semibold">Consultor</th>
                         <th className="py-3 px-4 font-semibold">Status</th>
                         <th className="py-3 px-4 font-semibold text-right">Ações Rápidas</th>
@@ -771,6 +1167,7 @@ export default function Home() {
                     <tbody className="divide-y divide-[#D1CCC1]/50">
                       {contactsQuery.data?.map((contact) => {
                         const assignedRep = repsQuery.data?.find(r => r.id === contact.assignedRepId);
+                        const isExpansion = contact.leadBatch === 'Expansão Nacional 2026';
                         return (
                           <tr key={contact.id} className="hover:bg-[#F5F2EB]/40 cursor-pointer" onClick={() => setSelectedContactId(contact.id)}>
                             <td className="py-3.5 px-4 font-bold text-[#1B4D3E]">
@@ -778,11 +1175,22 @@ export default function Home() {
                               <span className="block font-normal text-xs text-[#5C727D] font-mono">{contact.formattedPhone}</span>
                             </td>
                             <td className="py-3.5 px-4 text-[#1A3643]">
-                              {contact.city} <span className="text-xs text-[#5C727D]">({contact.state})</span>
+                              <span className="font-semibold block">{contact.city}</span>
+                              <span className="text-xs text-[#5C727D]">{contact.state}</span>
                             </td>
                             <td className="py-3.5 px-4">
-                              <span className="font-medium text-[#1A3643] block">{contact.segment}</span>
-                              <span className="text-xs text-[#5C727D] line-clamp-1">{contact.activity}</span>
+                              <Badge variant="outline" className="bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1] block w-fit mb-1 text-[11px]">
+                                {contact.leadType || contact.segment}
+                              </Badge>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isExpansion ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-700'}`}>
+                                {isExpansion ? 'Expansão 2026' : 'Base Inicial'}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className="text-xs font-semibold text-[#1A3643] block">
+                                {contact.interestAsset || 'Tratores e Implementos'}
+                              </span>
+                              <span className="text-[11px] text-[#5C727D] line-clamp-1">{contact.activity}</span>
                             </td>
                             <td className="py-3.5 px-4">
                               {assignedRep ? (
@@ -1136,7 +1544,12 @@ export default function Home() {
           <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-[#D1CCC1]">
             <div className="p-6 border-b border-[#D1CCC1] flex justify-between items-center bg-[#F5F2EB]">
               <div>
-                <Badge className="bg-[#1B4D3E] text-[#88B04B] mb-1">{selectedContact.segment}</Badge>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <Badge className="bg-[#1B4D3E] text-[#88B04B]">{selectedContact.leadType || selectedContact.segment}</Badge>
+                  <Badge variant="outline" className={selectedContact.leadBatch === 'Expansão Nacional 2026' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-stone-200 text-stone-800 border-stone-300'}>
+                    {selectedContact.leadBatch || 'Base existente'}
+                  </Badge>
+                </div>
                 <h3 className="text-2xl font-bold text-[#1B4D3E]">{selectedContact.organization}</h3>
                 <p className="text-xs text-[#5C727D]">{selectedContact.city} - {selectedContact.state} • {selectedContact.formattedPhone}</p>
               </div>
@@ -1146,6 +1559,40 @@ export default function Home() {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-6">
+              {/* Dados Cadastrais & Inteligência do Lead */}
+              <div className="bg-white p-4 rounded-xl border border-[#D1CCC1] shadow-sm space-y-3">
+                <div className="flex justify-between items-start gap-4">
+                  <div>
+                    <h4 className="font-bold text-sm text-[#1B4D3E] uppercase tracking-wider">Perfil & Atividade Produtiva</h4>
+                    <p className="text-xs text-[#1A3643] mt-0.5 leading-relaxed">{selectedContact.activity}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+                    onClick={() => handleWhatsAppClick(selectedContact.phone, selectedContact.organization, selectedContact.city, selectedContact.interestAsset)}
+                  >
+                    <MessageCircle className="w-4 h-4 mr-1.5" /> Iniciar WhatsApp
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#D1CCC1]/50 text-xs">
+                  <div>
+                    <span className="font-bold text-[#5C727D] block">Ativo Recomendado p/ Consórcio:</span>
+                    <span className="font-semibold text-[#1B4D3E]">{selectedContact.interestAsset || 'Tratores e Implementos'}</span>
+                  </div>
+                  <div>
+                    <span className="font-bold text-[#5C727D] block">Endereço / Sede:</span>
+                    <span className="text-[#1A3643]">{selectedContact.address || 'Município confirmado no cadastro público'}</span>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="font-bold text-[#5C727D] block">Fonte Oficial & Nota de Verificação:</span>
+                    <p className="text-[11px] text-[#5C727D] leading-relaxed mt-0.5">
+                      {selectedContact.verificationNote} • <a href={selectedContact.sourceUrl} target="_blank" rel="noreferrer" className="text-emerald-700 underline font-semibold">Acessar Fonte Pública</a>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Simulador 3 Cenários */}
               <div className="bg-[#F5F2EB] p-5 rounded-xl border border-[#D1CCC1] space-y-4">
                 <div className="flex justify-between items-center">
