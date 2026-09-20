@@ -43,6 +43,21 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+
+const chartColors = ['#1B4D3E', '#88B04B', '#D39B39', '#5C727D', '#B96A50', '#6B7F5B', '#8D6E63', '#3F7D7A'];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'contacts' | 'kanban' | 'team' | 'tasks' | 'reminders' | 'templates' | 'audit'>('dashboard');
@@ -251,6 +266,36 @@ export default function Home() {
   const leadBatches = useMemo(() => {
     return ['all', 'Expansão Nacional 2026', 'Base existente'];
   }, []);
+
+  const stateChartData = useMemo(() => {
+    return Object.entries(statsQuery.data?.stateCounts || {})
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [statsQuery.data?.stateCounts]);
+
+  const leadTypeChartData = useMemo(() => {
+    return Object.entries(statsQuery.data?.leadTypeCounts || {})
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [statsQuery.data?.leadTypeCounts]);
+
+  const handleStateChartClick = (payload: { name?: string }) => {
+    if (!payload.name) return;
+    setStateFilter(payload.name);
+    setLeadBatchFilter('all');
+    setLeadTypeFilter('all');
+    setActiveTab('contacts');
+    toast.success(`Filtro aplicado: ${payload.name}`);
+  };
+
+  const handleLeadTypeChartClick = (payload: { name?: string }) => {
+    if (!payload.name) return;
+    setLeadTypeFilter(payload.name);
+    setLeadBatchFilter('all');
+    setStateFilter('all');
+    setActiveTab('contacts');
+    toast.success(`Filtro aplicado: ${payload.name}`);
+  };
 
   // Iniciar conversa direta no WhatsApp
   const handleWhatsAppClick = (phone: string, org: string, city: string, asset?: string | null) => {
@@ -692,6 +737,112 @@ export default function Home() {
                   </CardHeader>
                   <CardContent>
                     <p className="text-xs text-[#5C727D]">Prontos para assumir carteiras</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Gráficos Interativos de Distribuição */}
+              <div className="space-y-6">
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <MapPin className="w-5 h-5 text-[#88B04B]" /> Distribuição por Estado (UF)
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Ranking de leads por unidade federativa cobrindo as 27 UFs. Clique em qualquer barra para abrir a listagem filtrada.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        {stateChartData.length} UFs
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="w-full overflow-x-auto">
+                      {stateChartData.length > 0 ? (
+                          <BarChart
+                            width={920}
+                            height={520}
+                            data={stateChartData}
+                            layout="vertical"
+                            margin={{ top: 8, right: 30, left: 8, bottom: 8 }}
+                            barCategoryGap={6}
+                            onClick={(data: any) => {
+                              const name = data?.activePayload?.[0]?.payload?.name;
+                              handleStateChartClick({ name });
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E7E2D8" />
+                            <XAxis type="number" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                            <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#1A3643', fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <RechartsTooltip
+                              cursor={{ fill: '#F5F2EB' }}
+                              contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                              formatter={(value: any) => [`${value} leads`, 'Quantidade']}
+                            />
+                            <Bar dataKey="value" name="Leads" fill="#1B4D3E" radius={[0, 6, 6, 0]} barSize={15} cursor="pointer" />
+                          </BarChart>
+                      ) : (
+                        <div className="h-[300px] flex items-center justify-center text-sm text-[#5C727D]">Carregando distribuição por UF...</div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <Building className="w-5 h-5 text-[#88B04B]" /> Tipo de Negócio
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Distribuição por segmento de atuação agrícola e industrial. Clique em uma barra para filtrar a base.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        {leadTypeChartData.length} categorias
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="w-full overflow-x-auto">
+                      {leadTypeChartData.length > 0 ? (
+                          <BarChart
+                            width={920}
+                            height={280}
+                            data={leadTypeChartData}
+                            layout="vertical"
+                            margin={{ top: 8, right: 30, left: 16, bottom: 8 }}
+                            barCategoryGap={8}
+                            onClick={(data: any) => {
+                              const name = data?.activePayload?.[0]?.payload?.name;
+                              handleLeadTypeChartClick({ name });
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E7E2D8" />
+                            <XAxis type="number" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                            <YAxis
+                              type="category"
+                              dataKey="name"
+                              width={240}
+                              tick={{ fill: '#1A3643', fontSize: 11, fontWeight: 600 }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <RechartsTooltip
+                              cursor={{ fill: '#F5F2EB' }}
+                              contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                              formatter={(value: any) => [`${value} leads`, 'Quantidade']}
+                            />
+                            <Bar dataKey="value" name="Leads" fill="#88B04B" radius={[0, 6, 6, 0]} barSize={18} cursor="pointer" />
+                          </BarChart>
+                      ) : (
+                        <div className="h-[280px] flex items-center justify-center text-sm text-[#5C727D]">Carregando tipos de negócio...</div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </div>

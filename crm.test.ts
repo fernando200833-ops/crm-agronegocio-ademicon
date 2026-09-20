@@ -152,6 +152,10 @@ describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
     const allLeads = await caller.crm.listContacts({});
     expect(allLeads.length).toBe(183);
 
+    const stats = await caller.crm.stats({});
+    expect(Object.values(stats.stateCounts).reduce((sum, value) => sum + value, 0)).toBe(183);
+    expect(Object.values(stats.leadTypeCounts).reduce((sum, value) => sum + value, 0)).toBe(183);
+
     // 2. Filtro por lote: Expansão Nacional 2026 deve retornar 88 leads
     const expansionLeads = await caller.crm.listContacts({ leadBatch: "Expansão Nacional 2026" });
     expect(expansionLeads.length).toBe(88);
