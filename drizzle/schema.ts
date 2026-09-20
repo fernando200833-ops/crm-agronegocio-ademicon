@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal, uniqueIndex } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -37,6 +37,21 @@ export const salesReps = mysqlTable("salesReps", {
 export type SalesRep = typeof salesReps.$inferSelect;
 export type InsertSalesRep = typeof salesReps.$inferInsert;
 
+export const salesRepMonthlyTargets = mysqlTable("salesRepMonthlyTargets", {
+  id: int("id").autoincrement().primaryKey(),
+  salesRepId: int("salesRepId").notNull(),
+  monthKey: varchar("monthKey", { length: 7 }).notNull(),
+  targetRate: int("targetRate").default(0).notNull(),
+  createdByUserId: int("createdByUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  salesRepMonthUnique: uniqueIndex("salesRepMonthlyTargets_salesRepId_monthKey_unique").on(table.salesRepId, table.monthKey),
+}));
+
+export type SalesRepMonthlyTarget = typeof salesRepMonthlyTargets.$inferSelect;
+export type InsertSalesRepMonthlyTarget = typeof salesRepMonthlyTargets.$inferInsert;
+
 export const contacts = mysqlTable("contacts", {
   id: int("id").autoincrement().primaryKey(),
   state: varchar("state", { length: 64 }).notNull(),
@@ -50,6 +65,11 @@ export const contacts = mysqlTable("contacts", {
   channelType: varchar("channelType", { length: 120 }).default("Canal Comercial Público"),
   sourceUrl: text("sourceUrl").notNull(),
   verificationNote: text("verificationNote").notNull(),
+  leadType: varchar("leadType", { length: 100 }).default("Empresa agrícola"),
+  leadSource: varchar("leadSource", { length: 160 }).default("Base inicial"),
+  leadBatch: varchar("leadBatch", { length: 160 }).default("Base existente"),
+  leadKey: varchar("leadKey", { length: 255 }).unique(),
+  verifiedAt: timestamp("verifiedAt"),
   interestAsset: varchar("interestAsset", { length: 255 }),
   pipelineStage: mysqlEnum("pipelineStage", [
     "novo",
