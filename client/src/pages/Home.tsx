@@ -195,6 +195,17 @@ export default function Home() {
   const [newRepName, setNewRepName] = useState('');
   const [newRepEmail, setNewRepEmail] = useState('');
   const [newRepPhone, setNewRepPhone] = useState('');
+  const [targetDrafts, setTargetDrafts] = useState<Record<number, number>>({});
+
+  const setMonthlyTargetMutation = trpc.crm.setMonthlyTarget.useMutation({
+    onSuccess: () => {
+      toast.success('Meta mensal atualizada com sucesso!');
+      utils.crm.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`Falha ao salvar meta: ${err.message}`);
+    }
+  });
 
   // Estados de lembrete
   const [webhookInput, setWebhookInput] = useState('');
@@ -281,6 +292,7 @@ export default function Home() {
     return (statsQuery.data?.repConversionStats || []).map((rep) => ({
       ...rep,
       shortName: rep.name.length > 24 ? `${rep.name.slice(0, 24)}…` : rep.name,
+      targetRate: rep.targetRate || 0,
     }));
   }, [statsQuery.data?.repConversionStats]);
 
@@ -877,7 +889,7 @@ export default function Home() {
                           <UserCheck className="w-5 h-5 text-[#88B04B]" /> Conversão por Consultor
                         </CardTitle>
                         <CardDescription className="text-xs text-[#5C727D] mt-1">
-                          Percentual de contratos fechados sobre a carteira atribuída. Clique em uma barra para abrir a carteira do consultor.
+                          Percentual de contratos fechados comparado com a meta mensal definida para o consultor.
                         </CardDescription>
                       </div>
                       <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
@@ -888,7 +900,7 @@ export default function Home() {
                   <CardContent>
                     {repConversionChartData.length > 0 ? (
                       <div className="w-full overflow-x-auto">
-                        <BarChart
+                        <ComposedChart
                           width={560}
                           height={320}
                           data={repConversionChartData}
@@ -923,12 +935,15 @@ export default function Home() {
                             contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
                             formatter={(value: any, name: any) => {
                               if (name === 'Conversão') return [`${value}%`, 'Conversão'];
+                              if (name === 'Meta Mensal') return [`${value}%`, 'Meta Mensal'];
                               return [value, name];
                             }}
                             labelFormatter={(_, payload) => payload?.[0]?.payload?.name || ''}
                           />
-                          <Bar dataKey="conversionRate" name="Conversão" fill="#1B4D3E" radius={[0, 6, 6, 0]} barSize={22} cursor="pointer" />
-                        </BarChart>
+                          <Legend wrapperStyle={{ fontSize: 11, color: '#1A3643' }} />
+                          <Bar dataKey="conversionRate" name="Conversão" fill="#1B4D3E" radius={[0, 6, 6, 0]} barSize={20} cursor="pointer" />
+                          <Line dataKey="targetRate" name="Meta Mensal" type="monotone" stroke="#D39B39" strokeWidth={3} strokeDasharray="4 4" dot={{ r: 5, fill: '#D39B39' }} />
+                        </ComposedChart>
                       </div>
                     ) : (
                       <div className="h-[320px] rounded-lg border border-dashed border-[#D1CCC1] bg-[#F5F2EB]/40 flex flex-col items-center justify-center text-center px-6">
@@ -1316,6 +1331,42 @@ export default function Home() {
                             <span className="text-xs text-[#5C727D] block">Fechados</span>
                             <span className="text-lg font-bold text-emerald-700">{repStat?.closedDeals || 0}</span>
                           </div>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-[#D1CCC1]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                          <div>
+                            <span className="text-[#5C727D] block font-medium">Meta de Conversão (mês atual):</span>
+                            <span className="font-extrabold text-[#1B4D3E] text-sm">
+                              {repStat?.targetRate ? `${repStat.targetRate}%` : 'Meta não definida'}
+                            </span>
+                          </div>
+                          {meQuery.data?.role === 'admin' ? (
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                placeholder="0 a 100%"
+                                value={targetDrafts[rep.id] ?? (repStat?.targetRate || '')}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  setTargetDrafts(prev => ({ ...prev, [rep.id]: Number.isNaN(val) ? 0 : Math.min(100, Math.max(0, val)) }));
+                                }}
+                                className="w-24 h-8 bg-[#F5F2EB]/60 border-[#D1CCC1] text-xs"
+                              />
+                              <Button
+                                size="sm"
+                                className="h-8 bg-[#1B4D3E] text-white hover:bg-[#1B4D3E]/90 text-xs px-2.5"
+                                onClick={() => {
+                                  const monthKey = repStat?.targetMonthKey || `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`;
+                                  const rate = targetDrafts[rep.id] ?? (repStat?.targetRate || 0);
+                                  setMonthlyTargetMutation.mutate({ salesRepId: rep.id, monthKey, targetRate: rate });
+                                }}
+                              >
+                                Salvar Meta
+                              </Button>
+                            </div>
+                          ) : null}
                         </div>
                       </CardContent>
                     </Card>
