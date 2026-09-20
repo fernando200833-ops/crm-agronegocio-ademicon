@@ -233,4 +233,64 @@ describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
     expect(repStats?.targetFinancialAmount).toBe(1500000);
     expect(typeof repStats?.actualFinancialAmount).toBe("number");
   });
+
+  it("deve permitir cadastrar cliente PF e PJ manualmente, listar usuários e verificar alertas de meta", async () => {
+    const adminUser = {
+      id: 501,
+      openId: "feature_admin",
+      email: "gestor.completo@ademicon.agro",
+      name: "Gestor Completo",
+      loginMethod: "password",
+      role: "admin" as const,
+      salesRepId: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      passwordHash: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
+    const { ctx: adminCtx } = createMockContext(adminUser);
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    // 1. Cadastro manual de Pessoa Física (Produtor Rural)
+    const clientPF = await adminCaller.crm.createManualContact({
+      organization: "João Batista Silveira",
+      clientType: "pf",
+      taxId: "123.456.789-00",
+      state: "Minas Gerais",
+      city: "Patos de Minas",
+      phone: "(34) 99123-4567",
+      activity: "Produtor de milho safrinha e soja em 450 hectares.",
+      segment: "Grãos e Cereais",
+      interestAsset: "Trator 180cv",
+    });
+    expect(clientPF).toBeDefined();
+
+    // 2. Cadastro manual de Pessoa Jurídica (Empresa/Usina)
+    const clientPJ = await adminCaller.crm.createManualContact({
+      organization: "Agropecuária Rio Paranaíba Ltda",
+      clientType: "pj",
+      taxId: "12.345.678/0001-99",
+      state: "Minas Gerais",
+      city: "Rio Paranaíba",
+      phone: "(34) 3855-1234",
+      activity: "Cultivo intensivo de café e pivôs centrais de grãos.",
+      segment: "Café",
+      interestAsset: "Colhedora de Café e Tratores",
+    });
+    expect(clientPJ).toBeDefined();
+
+    // 3. Listagem de usuários do sistema por administrador
+    const usersList = await adminCaller.crm.listSystemUsers();
+    expect(usersList.length).toBeGreaterThan(0);
+    expect(usersList.some((u) => u.email === "gestor.completo@ademicon.agro" || u.role === "admin")).toBe(true);
+
+    // 4. Verificação de alertas automáticos de metas (100% atingido)
+    const alertCheck = await adminCaller.crm.triggerTargetAlertCheck();
+    expect(alertCheck).toBeDefined();
+    expect(typeof alertCheck.triggered).toBe("number");
+  });
 });

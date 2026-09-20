@@ -681,6 +681,8 @@ export const appRouter = router({
           recipientEmail: z.string().optional(),
           webhookUrl: z.string().optional(),
           enabled: z.boolean().optional(),
+          targetAlertEnabled: z.boolean().optional(),
+          targetAlertThreshold: z.number().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -703,6 +705,55 @@ export const appRouter = router({
         entityType: "notification",
         ipAddress: getClientIp(ctx.req),
         metadata: JSON.stringify({ count: res.count }),
+      });
+        return res;
+      }),
+
+    createManualContact: protectedProcedure
+      .input(
+        z.object({
+          organization: z.string().min(2, "Nome ou razão social é obrigatório"),
+          clientType: z.enum(["pf", "pj"]),
+          taxId: z.string().optional(),
+          state: z.string().min(2, "Estado é obrigatório"),
+          city: z.string().min(2, "Município é obrigatório"),
+          phone: z.string().min(8, "Telefone é obrigatório"),
+          formattedPhone: z.string().optional(),
+          activity: z.string().min(2, "Atividade ou cultura é obrigatória"),
+          segment: z.string().min(2, "Segmento é obrigatório"),
+          interestAsset: z.string().optional(),
+          leadType: z.string().optional(),
+          assignedRepId: z.number().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const res = await db.createManualContact({
+          ...input,
+          assignedRepId: ctx.user.role === "admin" ? input.assignedRepId : (ctx.user.salesRepId || undefined),
+        });
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          action: "crm.create_contact",
+          entityType: "contact",
+          ipAddress: getClientIp(ctx.req),
+          metadata: JSON.stringify({ organization: input.organization, clientType: input.clientType }),
+        });
+        return res;
+      }),
+
+    listSystemUsers: adminProcedure.query(async () => {
+      return await db.listSystemUsers();
+    }),
+
+    triggerTargetAlertCheck: adminProcedure.mutation(async ({ ctx }) => {
+      const res = await db.checkAndTriggerTargetAlerts();
+      await db.createAuditLog({
+        userId: ctx.user.id,
+        action: "crm.trigger_target_alert_check",
+        entityType: "notification",
+        ipAddress: getClientIp(ctx.req),
+        metadata: JSON.stringify(res),
       });
       return res;
     }),

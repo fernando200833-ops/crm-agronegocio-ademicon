@@ -13,6 +13,7 @@ import {
   proposals,
   passwordResetTokens,
   auditLogs,
+  targetAchievementAlerts,
   Contact,
   InsertContact,
   Interaction,
@@ -632,6 +633,8 @@ export async function getDashboardStats(viewRepId?: number) {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
   };
   const repQuotedFinancialMap = new Map<number, number>();
+  const repClosedFinancialMap = new Map<number, number>();
+  const contactMap = new Map(all.map((c) => [c.id, c]));
   allProposals.forEach((p) => {
     const repId = p.createdByRepId;
     if (!repId) return;
@@ -639,6 +642,11 @@ export async function getDashboardStats(viewRepId?: number) {
     if (pMonthKey === currentMonthKey) {
       const current = repQuotedFinancialMap.get(repId) || 0;
       repQuotedFinancialMap.set(repId, current + Number(p.creditValue || 0));
+      const linkedContact = contactMap.get(p.contactId);
+      if (linkedContact && linkedContact.pipelineStage === "fechado") {
+        const closedCurrent = repClosedFinancialMap.get(repId) || 0;
+        repClosedFinancialMap.set(repId, closedCurrent + Number(p.creditValue || 0));
+      }
     }
   });
 
@@ -710,7 +718,9 @@ export async function getDashboardStats(viewRepId?: number) {
     closedDeals: repCounts[r.id]?.closed || 0,
     targetRate: repTargetMap.get(r.id) ?? 0,
     targetFinancialAmount: repTargetFinancialMap.get(r.id) ?? 0,
-    actualFinancialAmount: repQuotedFinancialMap.get(r.id) ?? 0,
+    actualFinancialAmount: (repClosedFinancialMap.get(r.id) || 0) > 0 ? (repClosedFinancialMap.get(r.id) || 0) : (repQuotedFinancialMap.get(r.id) || 0),
+    closedFinancialAmount: repClosedFinancialMap.get(r.id) || 0,
+    quotedFinancialAmount: repQuotedFinancialMap.get(r.id) || 0,
     targetMonthKey: currentMonthKey,
   }));
 
@@ -722,7 +732,9 @@ export async function getDashboardStats(viewRepId?: number) {
     closedDeals: r.closedDeals,
     targetRate: repTargetMap.get(r.id) ?? 0,
     targetFinancialAmount: repTargetFinancialMap.get(r.id) ?? 0,
-    actualFinancialAmount: repQuotedFinancialMap.get(r.id) ?? 0,
+    actualFinancialAmount: (repClosedFinancialMap.get(r.id) || 0) > 0 ? (repClosedFinancialMap.get(r.id) || 0) : (repQuotedFinancialMap.get(r.id) || 0),
+    closedFinancialAmount: repClosedFinancialMap.get(r.id) || 0,
+    quotedFinancialAmount: repQuotedFinancialMap.get(r.id) || 0,
     targetMonthKey: currentMonthKey,
     conversionRate: r.assignedContacts > 0 ? Math.round((r.closedDeals / r.assignedContacts) * 100) : 0,
     qualificationRate: r.assignedContacts > 0 ? Math.round((r.qualifiedLeads / r.assignedContacts) * 100) : 0,
@@ -782,8 +794,138 @@ export async function getDashboardStats(viewRepId?: number) {
     pendingTasks: pending.length,
     recentInteractions: recentInt,
     repStats,
-    repConversionStats,
-    segmentStats,
-    monthlyStats,
-  };
+  repConversionStats,
+  segmentStats,
+  monthlyStats,
+};
+}
+
+export async function createManualContact(data: {
+  organization: string;
+  clientType: "pf" | "pj";
+  taxId?: string;
+  state: string;
+  city: string;
+  phone: string;
+  formattedPhone?: string;
+  channelType?: string;
+  activity: string;
+  segment: string;
+  interestAsset?: string;
+  leadType?: string;
+  leadBatch?: string;
+  assignedRepId?: number;
+  sourceUrl?: string;
+  verificationNote?: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(contacts).values({
+    organization: data.organization,
+    clientType: data.clientType,
+    taxId: data.taxId || null,
+    state: data.state,
+    city: data.city,
+    phone: data.phone,
+    formattedPhone: data.formattedPhone || data.phone,
+    channelType: data.channelType || "Telefone / WhatsApp",
+    activity: data.activity,
+    segment: data.segment,
+    interestAsset: data.interestAsset || "Tratores, Colheitadeiras e Implementos",
+    leadType: data.leadType || (data.clientType === "pf" ? "Produtor Rural Individual (PF)" : "Empresa Agrícola / PJ"),
+    leadBatch: data.leadBatch || "Cadastro Manual",
+    assignedRepId: data.assignedRepId || null,
+    sourceUrl: data.sourceUrl || "Cadastro Direto no CRM",
+    verificationNote: data.verificationNote || "Cadastrado diretamente pelo consultor no CRM.",
+  });
+  return result;
+}
+
+export async function listSystemUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  const allUsers = await db.select({
+    id: users.id,
+    name: users.name,
+    email: users.email,
+    role: users.role,
+    salesRepId: users.salesRepId,
+    twoFactorEnabled: users.twoFactorEnabled,
+    failedLoginAttempts: users.failedLoginAttempts,
+    lockedUntil: users.lockedUntil,
+    lastSignedIn: users.lastSignedIn,
+    createdAt: users.createdAt,
+  }).from(users).orderBy(desc(users.createdAt));
+  return allUsers;
+}
+
+export async function checkAndTriggerTargetAlerts() {
+  const db = await getDb();
+  if (!db) return { triggered: 0, alerts: [] };
+
+  const settings = await getReminderSettings();
+  if (!settings || !settings.targetAlertEnabled || !settings.webhookUrl) {
+    return { triggered: 0, alerts: [], message: "Alertas de meta desativados ou sem webhook configurado." };
+  }
+
+  const stats = await getDashboardStats();
+  const triggeredList: Array<{ repName: string; target: number; achieved: number; monthKey: string }> = [];
+
+  for (const rep of stats.repStats) {
+    if (!rep.targetFinancialAmount || rep.targetFinancialAmount <= 0) continue;
+
+    const achieved = rep.actualFinancialAmount || 0;
+    const percent = Math.round((achieved / rep.targetFinancialAmount) * 100);
+    const threshold = settings.targetAlertThreshold || 100;
+
+    if (percent >= threshold) {
+      // Checa se já disparou neste mês
+      const existing = await db.select().from(targetAchievementAlerts)
+        .where(and(
+          eq(targetAchievementAlerts.salesRepId, rep.id),
+          eq(targetAchievementAlerts.monthKey, rep.targetMonthKey)
+        )).limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(targetAchievementAlerts).values({
+          salesRepId: rep.id,
+          monthKey: rep.targetMonthKey,
+          targetAmount: String(rep.targetFinancialAmount),
+          achievedAmount: String(achieved),
+        });
+
+        // Dispara Webhook
+        try {
+          await fetch(settings.webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              event: "crm.target_achieved",
+              salesRep: {
+                id: rep.id,
+                name: rep.name,
+              },
+              monthKey: rep.targetMonthKey,
+              targetAmountBRL: rep.targetFinancialAmount,
+              achievedAmountBRL: achieved,
+              achievementPercent: percent,
+              timestamp: new Date().toISOString(),
+              message: `🎉 Parabéns! O consultor ${rep.name} atingiu ${percent}% da sua meta mensal (${achieved.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} de ${rep.targetFinancialAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}).`,
+            }),
+          });
+        } catch (e) {
+          console.error("[Webhook] Erro ao disparar alerta de meta:", e);
+        }
+
+        triggeredList.push({
+          repName: rep.name,
+          target: rep.targetFinancialAmount,
+          achieved,
+          monthKey: rep.targetMonthKey,
+        });
+      }
+    }
+  }
+
+  return { triggered: triggeredList.length, alerts: triggeredList };
 }
