@@ -196,6 +196,7 @@ export default function Home() {
   const [newRepEmail, setNewRepEmail] = useState('');
   const [newRepPhone, setNewRepPhone] = useState('');
   const [targetDrafts, setTargetDrafts] = useState<Record<number, number>>({});
+  const [targetFinancialDrafts, setTargetFinancialDrafts] = useState<Record<number, number>>({});
 
   const setMonthlyTargetMutation = trpc.crm.setMonthlyTarget.useMutation({
     onSuccess: () => {
@@ -1306,68 +1307,177 @@ export default function Home() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {repsQuery.data?.map((rep) => {
                   const repStat = statsQuery.data?.repStats.find(s => s.id === rep.id);
+                  const assigned = repStat?.assignedContacts || 0;
+                  const closed = repStat?.closedDeals || 0;
+                  const convRate = assigned > 0 ? Math.round((closed / assigned) * 100) : 0;
+                  const targetRate = repStat?.targetRate || 0;
+                  const targetAmount = repStat?.targetFinancialAmount || 0;
+                  const actualAmount = repStat?.actualFinancialAmount || 0;
+
+                  const hasRateTarget = targetRate > 0;
+                  const hasAmountTarget = targetAmount > 0;
+                  const rateMet = hasRateTarget && convRate >= targetRate;
+                  const amountMet = hasAmountTarget && actualAmount >= targetAmount;
+                  const isSuperAchiever = rateMet && amountMet;
+                  const isAchiever = (rateMet || amountMet) || (hasRateTarget && rateMet) || (hasAmountTarget && amountMet);
+
+                  const formatBRL = (val: number) => {
+                    return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+                  };
+
                   return (
-                    <Card key={rep.id} className="bg-white border-[#D1CCC1] shadow-sm">
+                    <Card key={rep.id} className={`bg-white border shadow-sm transition-all ${
+                      isSuperAchiever
+                        ? 'border-emerald-400 ring-2 ring-emerald-500/20 bg-emerald-50/20'
+                        : isAchiever
+                        ? 'border-[#88B04B] ring-1 ring-[#88B04B]/30'
+                        : 'border-[#D1CCC1]'
+                    }`}>
                       <CardHeader className="pb-3">
-                        <div className="flex justify-between items-start">
+                        <div className="flex justify-between items-start gap-2">
                           <div>
-                            <CardTitle className="text-lg font-bold text-[#1B4D3E]">{rep.name}</CardTitle>
-                            <CardDescription className="text-xs text-[#5C727D]">{rep.email || 'Sem e-mail'} • {rep.phone || 'Sem telefone'}</CardDescription>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <CardTitle className="text-lg font-bold text-[#1B4D3E]">{rep.name}</CardTitle>
+                              {isSuperAchiever ? (
+                                <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 text-[11px] font-bold shadow-sm">
+                                  <CheckCircle2 className="w-3 h-3" /> Meta Batida (100%+)
+                                </Badge>
+                              ) : isAchiever ? (
+                                <Badge className="bg-[#88B04B] text-[#1B4D3E] flex items-center gap-1 text-[11px] font-bold">
+                                  <CheckCircle2 className="w-3 h-3" /> Meta Parcial Batida
+                                </Badge>
+                              ) : (hasRateTarget || hasAmountTarget) ? (
+                                <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-800 text-[11px] font-semibold">
+                                  Em Andamento
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-stone-300 text-stone-600 text-[11px]">
+                                  Sem Meta
+                                </Badge>
+                              )}
+                            </div>
+                            <CardDescription className="text-xs text-[#5C727D] mt-0.5">{rep.email || 'Sem e-mail'} • {rep.phone || 'Sem telefone'}</CardDescription>
                           </div>
-                          <Badge className="bg-[#88B04B] text-[#1B4D3E]">Ativo</Badge>
+                          <Badge className="bg-[#1B4D3E] text-white shrink-0 text-xs">Consultor Ativo</Badge>
                         </div>
                       </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-3 gap-2 bg-[#F5F2EB] p-3 rounded-lg text-center">
+                      <CardContent className="space-y-3">
+                        <div className="grid grid-cols-4 gap-2 bg-[#F5F2EB] p-2.5 rounded-lg text-center">
                           <div>
-                            <span className="text-xs text-[#5C727D] block">Carteira</span>
-                            <span className="text-lg font-bold text-[#1B4D3E]">{repStat?.assignedContacts || 0}</span>
+                            <span className="text-[10px] text-[#5C727D] uppercase font-bold block">Carteira</span>
+                            <span className="text-base font-extrabold text-[#1B4D3E]">{assigned}</span>
                           </div>
                           <div>
-                            <span className="text-xs text-[#5C727D] block">Qualificados</span>
-                            <span className="text-lg font-bold text-[#88B04B]">{repStat?.qualifiedLeads || 0}</span>
+                            <span className="text-[10px] text-[#5C727D] uppercase font-bold block">Qualificados</span>
+                            <span className="text-base font-extrabold text-[#88B04B]">{repStat?.qualifiedLeads || 0}</span>
                           </div>
                           <div>
-                            <span className="text-xs text-[#5C727D] block">Fechados</span>
-                            <span className="text-lg font-bold text-emerald-700">{repStat?.closedDeals || 0}</span>
+                            <span className="text-[10px] text-[#5C727D] uppercase font-bold block">Fechados</span>
+                            <span className="text-base font-extrabold text-emerald-700">{closed}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-[#5C727D] uppercase font-bold block">Conversão</span>
+                            <span className="text-base font-extrabold text-[#1A3643]">{convRate}%</span>
                           </div>
                         </div>
 
-                        <div className="mt-4 pt-3 border-t border-[#D1CCC1]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                          <div>
-                            <span className="text-[#5C727D] block font-medium">Meta de Conversão (mês atual):</span>
-                            <span className="font-extrabold text-[#1B4D3E] text-sm">
-                              {repStat?.targetRate ? `${repStat.targetRate}%` : 'Meta não definida'}
+                        {/* Metas e Desempenho em Reais */}
+                        <div className="p-3 bg-white rounded-lg border border-[#D1CCC1]/70 space-y-2 text-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[#5C727D] font-medium flex items-center gap-1">
+                              <DollarSign className="w-3.5 h-3.5 text-[#88B04B]" /> Volume em Crédito Cotado:
+                            </span>
+                            <span className="font-extrabold text-[#1B4D3E]">
+                              {formatBRL(actualAmount)}
                             </span>
                           </div>
-                          {meQuery.data?.role === 'admin' ? (
-                            <div className="flex items-center gap-2">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                placeholder="0 a 100%"
-                                value={targetDrafts[rep.id] ?? (repStat?.targetRate || '')}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10);
-                                  setTargetDrafts(prev => ({ ...prev, [rep.id]: Number.isNaN(val) ? 0 : Math.min(100, Math.max(0, val)) }));
-                                }}
-                                className="w-24 h-8 bg-[#F5F2EB]/60 border-[#D1CCC1] text-xs"
-                              />
-                              <Button
-                                size="sm"
-                                className="h-8 bg-[#1B4D3E] text-white hover:bg-[#1B4D3E]/90 text-xs px-2.5"
-                                onClick={() => {
-                                  const monthKey = repStat?.targetMonthKey || `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`;
-                                  const rate = targetDrafts[rep.id] ?? (repStat?.targetRate || 0);
-                                  setMonthlyTargetMutation.mutate({ salesRepId: rep.id, monthKey, targetRate: rate });
-                                }}
-                              >
-                                Salvar Meta
-                              </Button>
+
+                          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#D1CCC1]/40">
+                            <div>
+                              <span className="text-[11px] text-[#5C727D] block">Meta Conversão:</span>
+                              <span className="font-bold text-[#1A3643]">
+                                {hasRateTarget ? `${targetRate}%` : 'Não definida'}
+                              </span>
+                              {hasRateTarget && (
+                                <span className={`text-[10px] block font-semibold ${convRate >= targetRate ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                  {convRate >= targetRate ? `✓ Superou (+${convRate - targetRate}%)` : `Faltam ${targetRate - convRate}%`}
+                                </span>
+                              )}
                             </div>
-                          ) : null}
+
+                            <div>
+                              <span className="text-[11px] text-[#5C727D] block">Meta Financeira (R$):</span>
+                              <span className="font-bold text-[#1A3643]">
+                                {hasAmountTarget ? formatBRL(targetAmount) : 'Não definida'}
+                              </span>
+                              {hasAmountTarget && (
+                                <span className={`text-[10px] block font-semibold ${actualAmount >= targetAmount ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                  {actualAmount >= targetAmount ? '✓ Atingida' : `${Math.round((actualAmount / targetAmount) * 100)}% atingido`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
+
+                        {/* Formulário Admin para Configurar Metas */}
+                        {meQuery.data?.role === 'admin' ? (
+                          <div className="pt-2 border-t border-[#D1CCC1]/60 space-y-2">
+                            <span className="text-[11px] font-bold text-[#1B4D3E] uppercase tracking-wider block">
+                              Definir Metas do Mês ({repStat?.targetMonthKey || 'Atual'})
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <label className="text-[10px] text-[#5C727D] block mb-0.5 font-medium">Meta Conversão (%):</label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  placeholder="0 a 100%"
+                                  value={targetDrafts[rep.id] ?? (repStat?.targetRate || '')}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
+                                    setTargetDrafts(prev => ({ ...prev, [rep.id]: Number.isNaN(val) ? 0 : Math.min(100, Math.max(0, val)) }));
+                                  }}
+                                  className="h-8 bg-[#F5F2EB]/60 border-[#D1CCC1] text-xs"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[10px] text-[#5C727D] block mb-0.5 font-medium">Volume Financeiro (R$):</label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={10000}
+                                  placeholder="Ex: 1500000"
+                                  value={targetFinancialDrafts[rep.id] ?? (repStat?.targetFinancialAmount || '')}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    setTargetFinancialDrafts(prev => ({ ...prev, [rep.id]: Number.isNaN(val) ? 0 : Math.max(0, val) }));
+                                  }}
+                                  className="h-8 bg-[#F5F2EB]/60 border-[#D1CCC1] text-xs"
+                                />
+                              </div>
+                            </div>
+
+                            <Button
+                              size="sm"
+                              className="w-full h-8 bg-[#1B4D3E] text-white hover:bg-[#1B4D3E]/90 text-xs font-semibold"
+                              onClick={() => {
+                                const monthKey = repStat?.targetMonthKey || `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`;
+                                const rate = targetDrafts[rep.id] ?? (repStat?.targetRate || 0);
+                                const fin = targetFinancialDrafts[rep.id] ?? (repStat?.targetFinancialAmount || 0);
+                                setMonthlyTargetMutation.mutate({
+                                  salesRepId: rep.id,
+                                  monthKey,
+                                  targetRate: rate,
+                                  targetFinancialAmount: fin,
+                                });
+                              }}
+                            >
+                              Salvar Metas do Consultor
+                            </Button>
+                          </div>
+                        ) : null}
                       </CardContent>
                     </Card>
                   );
