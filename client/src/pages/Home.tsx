@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
 import { 
   Tractor, 
   Users, 
@@ -40,7 +41,12 @@ import {
   BarChart3,
   FileSpreadsheet,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  FileDown,
+  UserCheck2,
+  Crown,
+  Award,
+  Trophy
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -58,7 +64,7 @@ import {
 const chartColors = ['#1B4D3E', '#88B04B', '#D39B39', '#5C727D', '#B96A50', '#6B7F5B', '#8D6E63', '#3F7D7A'];
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'contacts' | 'kanban' | 'team' | 'tasks' | 'reminders' | 'templates' | 'audit'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'contacts' | 'kanban' | 'team' | 'tasks' | 'reminders' | 'templates' | 'audit' | 'users'>('dashboard');
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState('all');
   const [leadTypeFilter, setLeadTypeFilter] = useState('all');
@@ -78,6 +84,168 @@ export default function Home() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Estados de Novo Cliente Manual (PF / PJ)
+  const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
+  const [newClientType, setNewClientType] = useState<'pf' | 'pj'>('pj');
+  const [newClientOrg, setNewClientOrg] = useState('');
+  const [newClientTaxId, setNewClientTaxId] = useState('');
+  const [newClientState, setNewClientState] = useState('Minas Gerais');
+  const [newClientCity, setNewClientCity] = useState('');
+  const [newClientPhone, setNewClientPhone] = useState('');
+  const [newClientActivity, setNewClientActivity] = useState('');
+  const [newClientSegment, setNewClientSegment] = useState('Grãos e Cereais');
+  const [newClientAsset, setNewClientAsset] = useState('Tratores, Colheitadeiras e Implementos');
+  const [newClientRepId, setNewClientRepId] = useState<number | undefined>(undefined);
+
+  // Consulta de Usuários com Acesso ao Sistema
+  const usersQuery = trpc.crm.listSystemUsers.useQuery(undefined, {
+    enabled: activeTab === 'users',
+  });
+
+  // Mutation de Novo Cliente
+  const createClientMutation = trpc.crm.createManualContact.useMutation({
+    onSuccess: () => {
+      toast.success(newClientType === 'pf' ? 'Produtor Rural (Pessoa Física) cadastrado com sucesso!' : 'Empresa / Usina (Pessoa Jurídica) cadastrada!');
+      setIsNewClientModalOpen(false);
+      setNewClientOrg('');
+      setNewClientTaxId('');
+      setNewClientCity('');
+      setNewClientPhone('');
+      setNewClientActivity('');
+      utils.crm.invalidate();
+    },
+    onError: (err) => {
+      toast.error('Erro ao cadastrar cliente: ' + err.message);
+    }
+  });
+
+  // Mutation de Alerta de Metas
+  const triggerTargetAlertMutation = trpc.crm.triggerTargetAlertCheck.useMutation({
+    onSuccess: (data) => {
+      if (data.triggered > 0) {
+        toast.success(`Alerta de meta disparado para ${data.triggered} consultor(es) via Webhook!`);
+      } else {
+        toast.info(data.message || 'Nenhum consultor novo com 100% da meta atingida neste mês.');
+      }
+    },
+    onError: (err) => {
+      toast.error('Erro ao verificar alerta de metas: ' + err.message);
+    }
+  });
+
+  // Geração de Relatório Executivo em PDF
+  const handleDownloadExecutivePDF = () => {
+    try {
+      const doc = new jsPDF();
+      const currentMonth = statsQuery.data?.repStats?.[0]?.targetMonthKey || `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`;
+      
+      // Cabeçalho
+      doc.setFillColor(27, 77, 62); // #1B4D3E
+      doc.rect(0, 0, 210, 36, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text('ADEMICON AGRO — RELATÓRIO EXECUTIVO', 14, 16);
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Desempenho da Equipe Comercial & Metas Mensais • Competência: ${currentMonth}`, 14, 24);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} por ${meQuery.data?.name || 'Administrador'}`, 14, 30);
+      
+      // Resumo Geral
+      doc.setTextColor(27, 77, 62);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('1. Resumo da Operação Comercial', 14, 46);
+      
+      doc.setDrawColor(209, 204, 193);
+      doc.setFillColor(245, 242, 235);
+      doc.roundedRect(14, 50, 182, 24, 3, 3, 'FD');
+      
+      doc.setTextColor(26, 54, 67);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      
+      const totalLeads = contactsQuery.data?.length || 0;
+      const totalReps = repsQuery.data?.length || 0;
+      const totalFechados = statsQuery.data?.stageCounts?.fechado || 0;
+      const totalVolumeRealizado = statsQuery.data?.repStats?.reduce((acc, r) => acc + (r.actualFinancialAmount || 0), 0) || 0;
+      
+      doc.text(`Total de Leads na Base: ${totalLeads}`, 20, 58);
+      doc.text(`Consultores em Atividade: ${totalReps}`, 20, 66);
+      doc.text(`Contratos Fechados: ${totalFechados}`, 110, 58);
+      doc.text(`Volume Financeiro Realizado: ${totalVolumeRealizado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 110, 66);
+      
+      // Tabela de Desempenho dos Consultores
+      doc.setTextColor(27, 77, 62);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('2. Desempenho Individual dos Membros da Equipe', 14, 84);
+      
+      let y = 92;
+      doc.setFillColor(235, 230, 219);
+      doc.rect(14, y, 182, 8, 'F');
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(27, 77, 62);
+      doc.text('CONSULTOR', 16, y + 5.5);
+      doc.text('CARTEIRA', 70, y + 5.5);
+      doc.text('FECHADOS', 92, y + 5.5);
+      doc.text('META (R$)', 114, y + 5.5);
+      doc.text('REALIZADO (R$)', 146, y + 5.5);
+      doc.text('% META', 180, y + 5.5);
+      
+      y += 8;
+      const repsList = statsQuery.data?.repStats || [];
+      repsList.forEach((rep, index) => {
+        const target = rep.targetFinancialAmount || 0;
+        const actual = rep.actualFinancialAmount || 0;
+        const percent = target > 0 ? Math.round((actual / target) * 100) : 0;
+        const isOdd = index % 2 === 1;
+        
+        if (isOdd) {
+          doc.setFillColor(250, 248, 245);
+          doc.rect(14, y, 182, 7, 'F');
+        }
+        
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(26, 54, 67);
+        doc.text(rep.name.substring(0, 26), 16, y + 5);
+        doc.text(String(rep.assignedContacts || 0), 74, y + 5);
+        doc.text(String(rep.closedDeals || 0), 96, y + 5);
+        doc.text(target > 0 ? target.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) : '—', 114, y + 5);
+        doc.text(actual > 0 ? actual.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) : 'R$ 0', 146, y + 5);
+        
+        if (percent >= 100) {
+          doc.setTextColor(16, 120, 60);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`${percent}% (Batida)`, 176, y + 5);
+        } else if (target > 0) {
+          doc.setTextColor(180, 100, 20);
+          doc.text(`${percent}%`, 180, y + 5);
+        } else {
+          doc.setTextColor(120, 120, 120);
+          doc.text('Sem meta', 178, y + 5);
+        }
+        
+        y += 7;
+      });
+      
+      // Rodapé Institucional
+      doc.setFontSize(8);
+      doc.setTextColor(120, 120, 120);
+      doc.setFont('helvetica', 'italic');
+      doc.text('Documento gerado pelo sistema CRM Ademicon Agro — Uso interno e confidencial da equipe comercial.', 14, 285);
+      
+      doc.save(`relatorio_executivo_equipe_${currentMonth}.pdf`);
+      toast.success('Relatório executivo em PDF baixado com sucesso!');
+    } catch (err: any) {
+      toast.error('Erro ao gerar PDF: ' + err.message);
+    }
+  };
+
 
   // Queries
   const statsQuery = trpc.crm.stats.useQuery({
@@ -1070,6 +1238,13 @@ export default function Home() {
                   </Button>
                   <Button
                     size="sm"
+                    onClick={() => setIsNewClientModalOpen(true)}
+                    className="bg-[#88B04B] text-[#1B4D3E] font-bold hover:bg-[#88B04B]/90"
+                  >
+                    <Plus className="w-4 h-4 mr-1" /> Adicionar Cliente (PF / PJ)
+                  </Button>
+                  <Button
+                    size="sm"
                     onClick={() => setIsImportModalOpen(true)}
                     className="bg-[#1B4D3E] text-white hover:bg-[#1B4D3E]/90"
                   >
@@ -1252,12 +1427,117 @@ export default function Home() {
           {/* TAB EQUIPE COMERCIAL */}
           {activeTab === 'team' && (
             <div className="space-y-6 max-w-5xl mx-auto">
-              <div>
-                <h2 className="text-3xl font-extrabold text-[#1B4D3E]">Gestão da Equipe Comercial</h2>
-                <p className="text-sm text-[#5C727D]">
-                  Cadastre consultores, acompanhe metas e distribua a carteira de produtores rurais.
-                </p>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-3xl font-extrabold text-[#1B4D3E]">Gestão da Equipe Comercial</h2>
+                  <p className="text-sm text-[#5C727D]">
+                    Cadastre consultores, acompanhe metas e distribua a carteira de produtores rurais.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDownloadExecutivePDF}
+                    className="border-[#1B4D3E] text-[#1B4D3E] hover:bg-[#F5F2EB] font-semibold"
+                  >
+                    <Download className="w-4 h-4 mr-1.5" /> Relatório Executivo (PDF)
+                  </Button>
+                  {meQuery.data?.role === 'admin' && (
+                    <Button
+                      size="sm"
+                      onClick={() => triggerTargetAlertMutation.mutate()}
+                      className="bg-[#88B04B] text-[#1B4D3E] hover:bg-[#88B04B]/90 font-bold"
+                    >
+                      <Bell className="w-4 h-4 mr-1.5" /> Verificar Metas 100%
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {/* RANKING VISUAL DE CONSULTORES COM PÓDIO */}
+              <Card className="bg-gradient-to-br from-white to-[#F5F2EB] border-[#D1CCC1] shadow-sm">
+                <CardHeader className="pb-3 border-b border-[#D1CCC1]/60">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <CardTitle className="text-xl font-bold text-[#1B4D3E] flex items-center gap-2">
+                        <Trophy className="w-6 h-6 text-[#D39B39]" /> Ranking Comercial de Fechamento do Mês
+                      </CardTitle>
+                      <CardDescription className="text-xs text-[#5C727D]">
+                        Classificação oficial da equipe pelos maiores volumes financeiros fechados na safra.
+                      </CardDescription>
+                    </div>
+                    <Badge className="bg-[#1B4D3E] text-[#88B04B]">Competência Atual</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-5">
+                  {/* Pódio Top 3 */}
+                  {(() => {
+                    const sortedReps = [...(statsQuery.data?.repStats || [])].sort((a, b) => (b.actualFinancialAmount || 0) - (a.actualFinancialAmount || 0));
+                    const top1 = sortedReps[0];
+                    const top2 = sortedReps[1];
+                    const top3 = sortedReps[2];
+
+                    const formatCurrency = (val?: number) => (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+
+                    if (sortedReps.length === 0) {
+                      return <p className="text-center text-sm text-[#5C727D] py-6">Nenhum consultor cadastrado para exibição do ranking.</p>;
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end pt-2">
+                        {/* 2º Lugar - Prata */}
+                        <div className="p-4 bg-white rounded-xl border border-stone-300 shadow-sm text-center flex flex-col justify-between order-2 md:order-1 h-[210px]">
+                          <div>
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-200 text-slate-800 font-extrabold text-sm mb-2 shadow-inner">
+                              2º
+                            </span>
+                            <h4 className="font-bold text-[#1B4D3E] text-base truncate">{top2?.name || 'Vago'}</h4>
+                            <span className="text-xs text-[#5C727D] block">{top2 ? `${top2.closedDeals} fechamento(s)` : 'Sem consultor'}</span>
+                          </div>
+                          <div className="pt-2 border-t border-[#D1CCC1]/40">
+                            <span className="text-[10px] text-[#5C727D] uppercase font-bold block">Volume Fechado</span>
+                            <span className="text-lg font-extrabold text-[#1B4D3E]">{formatCurrency(top2?.actualFinancialAmount)}</span>
+                          </div>
+                        </div>
+
+                        {/* 1º Lugar - Ouro */}
+                        <div className="p-5 bg-gradient-to-b from-amber-50 to-white rounded-xl border-2 border-[#D39B39] shadow-md text-center flex flex-col justify-between order-1 md:order-2 h-[240px] relative">
+                          <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-[#D39B39] text-[#1A3643] px-3 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider shadow">
+                            👑 Líder do Mês
+                          </div>
+                          <div>
+                            <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-amber-200 text-amber-900 font-black text-base mb-2 shadow-inner">
+                              1º
+                            </span>
+                            <h4 className="font-extrabold text-[#1B4D3E] text-lg truncate">{top1?.name || 'Vago'}</h4>
+                            <span className="text-xs text-[#5C727D] block font-medium">{top1 ? `${top1.closedDeals} fechamento(s)` : 'Sem consultor'}</span>
+                          </div>
+                          <div className="pt-2 border-t border-amber-200">
+                            <span className="text-[10px] text-amber-800 uppercase font-black block">Volume Campeão</span>
+                            <span className="text-2xl font-black text-[#1B4D3E]">{formatCurrency(top1?.actualFinancialAmount)}</span>
+                          </div>
+                        </div>
+
+                        {/* 3º Lugar - Bronze */}
+                        <div className="p-4 bg-white rounded-xl border border-amber-200/80 shadow-sm text-center flex flex-col justify-between order-3 md:order-3 h-[190px]">
+                          <div>
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-extrabold text-sm mb-2 shadow-inner">
+                              3º
+                            </span>
+                            <h4 className="font-bold text-[#1B4D3E] text-base truncate">{top3?.name || 'Vago'}</h4>
+                            <span className="text-xs text-[#5C727D] block">{top3 ? `${top3.closedDeals} fechamento(s)` : 'Sem consultor'}</span>
+                          </div>
+                          <div className="pt-2 border-t border-[#D1CCC1]/40">
+                            <span className="text-[10px] text-[#5C727D] uppercase font-bold block">Volume Fechado</span>
+                            <span className="text-base font-extrabold text-[#1B4D3E]">{formatCurrency(top3?.actualFinancialAmount)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
 
               {meQuery.data?.role === 'admin' && (
                 <Card className="bg-white border-[#D1CCC1]">
@@ -1524,13 +1804,32 @@ export default function Home() {
                     </div>
 
                     <div>
-                      <label className="text-xs font-bold text-[#5C727D] block mb-1">Webhook URL (Slack, Discord, n8n)</label>
+                      <label className="text-xs font-bold text-[#5C727D] block mb-1">Webhook URL (Slack, Discord, n8n, WhatsApp API)</label>
                       <Input 
                         defaultValue={reminderSettingsQuery.data?.webhookUrl || ''}
                         onChange={(e) => setWebhookInput(e.target.value)}
                         placeholder="https://seu-webhook.com"
                         className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
                       />
+                    </div>
+
+                    <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-sm text-[#1B4D3E] flex items-center gap-2">
+                            <Trophy className="w-4 h-4 text-[#D39B39]" /> Alerta Automático de Meta Atingida (100%+)
+                          </span>
+                          <p className="text-xs text-[#5C727D] mt-0.5">
+                            Envia payload JSON para a Webhook URL sempre que um consultor atingir ou superar a meta financeira do mês.
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          defaultChecked={reminderSettingsQuery.data?.targetAlertEnabled ?? true}
+                          id="target-alert-toggle"
+                          className="w-4 h-4 text-[#1B4D3E] rounded cursor-pointer"
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-[#D1CCC1]/60">
@@ -1849,6 +2148,187 @@ export default function Home() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+            {/* MODAL DE CADASTRO DE NOVO CLIENTE (PF / PJ) */}
+      {isNewClientModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-[#D1CCC1] space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-3 border-b border-[#D1CCC1]">
+              <div>
+                <h3 className="text-xl font-bold text-[#1B4D3E] flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-[#88B04B]" /> Cadastrar Novo Cliente no CRM
+                </h3>
+                <p className="text-xs text-[#5C727D] mt-0.5">
+                  Adicione produtores rurais individuais (PF) ou empresas/usinas agrícolas (PJ) para prospecção de consórcio.
+                </p>
+              </div>
+              <Button variant="ghost" onClick={() => setIsNewClientModalOpen(false)}>
+                Fechar
+              </Button>
+            </div>
+
+            {/* Alternador PF vs PJ */}
+            <div className="flex gap-3 bg-[#F5F2EB] p-1.5 rounded-xl border border-[#D1CCC1]">
+              <button
+                type="button"
+                onClick={() => setNewClientType('pj')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                  newClientType === 'pj' ? 'bg-[#1B4D3E] text-white shadow-sm' : 'text-[#5C727D] hover:text-[#1A3643]'
+                }`}
+              >
+                Pessoa Jurídica (Empresa / Usina / Cooperativa)
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewClientType('pf')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                  newClientType === 'pf' ? 'bg-[#1B4D3E] text-white shadow-sm' : 'text-[#5C727D] hover:text-[#1A3643]'
+                }`}
+              >
+                Pessoa Física (Produtor Rural Individual / Fazendeiro)
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="sm:col-span-2">
+                <label className="font-bold text-[#5C727D] block mb-1">
+                  {newClientType === 'pf' ? 'Nome Completo do Produtor / Fazendeiro *' : 'Razão Social ou Nome Fantasia da Empresa / Usina *'}
+                </label>
+                <Input
+                  placeholder={newClientType === 'pf' ? 'Ex: João Carlos de Almeida' : 'Ex: Fazenda Santa Maria Agropecuária S/A'}
+                  value={newClientOrg}
+                  onChange={(e) => setNewClientOrg(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#5C727D] block mb-1">
+                  {newClientType === 'pf' ? 'CPF do Produtor' : 'CNPJ da Empresa'}
+                </label>
+                <Input
+                  placeholder={newClientType === 'pf' ? '000.000.000-00' : '00.000.000/0001-00'}
+                  value={newClientTaxId}
+                  onChange={(e) => setNewClientTaxId(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#5C727D] block mb-1">Telefone / WhatsApp Comercial *</label>
+                <Input
+                  placeholder="(34) 99999-8888"
+                  value={newClientPhone}
+                  onChange={(e) => setNewClientPhone(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#5C727D] block mb-1">Estado (UF) *</label>
+                <select
+                  value={newClientState}
+                  onChange={(e) => setNewClientState(e.target.value)}
+                  className="w-full h-9 bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-md px-3 text-xs text-[#1A3643] focus:outline-none"
+                >
+                  {states.filter(s => s !== 'all').map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-[#5C727D] block mb-1">Município Sede *</label>
+                <Input
+                  placeholder="Ex: Patos de Minas, Rio Verde..."
+                  value={newClientCity}
+                  onChange={(e) => setNewClientCity(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#5C727D] block mb-1">Segmento / Cultura Produtiva *</label>
+                <select
+                  value={newClientSegment}
+                  onChange={(e) => setNewClientSegment(e.target.value)}
+                  className="w-full h-9 bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-md px-3 text-xs text-[#1A3643] focus:outline-none"
+                >
+                  <option value="Grãos e Cereais">Grãos e Cereais (Soja, Milho)</option>
+                  <option value="Café">Cafeicultura</option>
+                  <option value="Cana-de-Açúcar">Cana-de-Açúcar / Sucroalcooleiro</option>
+                  <option value="Pecuária de Corte e Leite">Pecuária de Corte / Leite</option>
+                  <option value="Citros e Hortifrúti">Citros e Fruticultura</option>
+                  <option value="Algodão">Algodão e Fibras</option>
+                  <option value="Máquinas e Insumos">Revenda / Insumos Agrícolas</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-[#5C727D] block mb-1">Ativo de Interesse (Consórcio)</label>
+                <Input
+                  placeholder="Ex: Trator 200cv, Colheitadeira de Grãos..."
+                  value={newClientAsset}
+                  onChange={(e) => setNewClientAsset(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="font-bold text-[#5C727D] block mb-1">Atividade Produtiva & Histórico da Propriedade *</label>
+                <Input
+                  placeholder="Ex: Plantio direto em 1.500 hectares, renovação de frota prevista para safra 2026/2027"
+                  value={newClientActivity}
+                  onChange={(e) => setNewClientActivity(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              {meQuery.data?.role === 'admin' && (
+                <div className="sm:col-span-2">
+                  <label className="font-bold text-[#5C727D] block mb-1">Atribuir Carteira a um Consultor</label>
+                  <select
+                    value={newClientRepId ? String(newClientRepId) : ''}
+                    onChange={(e) => setNewClientRepId(e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                    className="w-full h-9 bg-[#F5F2EB]/60 border border-[#D1CCC1] rounded-md px-3 text-xs text-[#1A3643] focus:outline-none"
+                  >
+                    <option value="">Nenhum consultor atribuído (Fila Geral)</option>
+                    {repsQuery.data?.map(rep => (
+                      <option key={rep.id} value={String(rep.id)}>{rep.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-[#D1CCC1]">
+              <Button variant="ghost" onClick={() => setIsNewClientModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                disabled={!newClientOrg.trim() || !newClientPhone.trim() || !newClientCity.trim() || !newClientActivity.trim() || createClientMutation.isPending}
+                className="bg-[#1B4D3E] text-white hover:bg-[#1B4D3E]/90 font-bold"
+                onClick={() => {
+                  createClientMutation.mutate({
+                    organization: newClientOrg,
+                    clientType: newClientType,
+                    taxId: newClientTaxId || undefined,
+                    state: newClientState,
+                    city: newClientCity,
+                    phone: newClientPhone,
+                    activity: newClientActivity,
+                    segment: newClientSegment,
+                    interestAsset: newClientAsset || undefined,
+                    assignedRepId: newClientRepId,
+                  });
+                }}
+              >
+                {createClientMutation.isPending ? 'Cadastrando...' : 'Salvar Novo Cliente'}
+              </Button>
             </div>
           </div>
         </div>
