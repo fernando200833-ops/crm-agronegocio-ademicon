@@ -210,14 +210,16 @@ describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
     const now = new Date();
     const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 
-    // Cadastrar meta mensal de 25% para o consultor
+    // Cadastrar meta mensal de 25% e R$ 1.500.000 para o consultor
     const target = await adminCaller.crm.setMonthlyTarget({
       salesRepId: (rep as any).id,
       monthKey,
       targetRate: 25,
+      targetFinancialAmount: 1500000,
     });
     expect(target).toBeDefined();
     expect(target?.targetRate).toBe(25);
+    expect(Number(target?.targetFinancialAmount)).toBe(1500000);
 
     // Consulta de metas mensais
     const targetList = await adminCaller.crm.listMonthlyTargets({ monthKey });
@@ -228,5 +230,7 @@ describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
     const repStats = stats.repConversionStats.find((r) => r.id === (rep as any).id);
     expect(repStats).toBeDefined();
     expect(repStats?.targetRate).toBe(25);
+    expect(repStats?.targetFinancialAmount).toBe(1500000);
+    expect(typeof repStats?.actualFinancialAmount).toBe("number");
   });
 });

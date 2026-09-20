@@ -378,6 +378,7 @@ export const appRouter = router({
           salesRepId: z.number(),
           monthKey: z.string().regex(/^\d{4}-\d{2}$/, "Mês inválido. Formato esperado: AAAA-MM"),
           targetRate: z.number().min(0).max(100),
+          targetFinancialAmount: z.number().min(0).optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -385,6 +386,7 @@ export const appRouter = router({
           salesRepId: input.salesRepId,
           monthKey: input.monthKey,
           targetRate: input.targetRate,
+          targetFinancialAmount: input.targetFinancialAmount,
           createdByUserId: ctx.user.id,
         });
         await db.createAuditLog({

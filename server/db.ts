@@ -404,19 +404,23 @@ export async function setSalesRepMonthlyTarget(data: {
   salesRepId: number;
   monthKey: string;
   targetRate: number;
+  targetFinancialAmount?: number;
   createdByUserId?: number | null;
 }) {
   const db = await getDb();
   if (!db) return undefined;
   const boundedTarget = Math.max(0, Math.min(100, Math.round(data.targetRate)));
+  const financialAmount = Math.max(0, Number(data.targetFinancialAmount || 0));
   await db.insert(salesRepMonthlyTargets).values({
     salesRepId: data.salesRepId,
     monthKey: data.monthKey,
     targetRate: boundedTarget,
+    targetFinancialAmount: financialAmount.toFixed(2),
     createdByUserId: data.createdByUserId || null,
   }).onDuplicateKeyUpdate({
     set: {
       targetRate: boundedTarget,
+      targetFinancialAmount: financialAmount.toFixed(2),
       createdByUserId: data.createdByUserId || null,
       updatedAt: new Date(),
     },
@@ -617,6 +621,26 @@ export async function getDashboardStats(viewRepId?: number) {
   const repTargets = await db.select().from(salesRepMonthlyTargets).where(eq(salesRepMonthlyTargets.monthKey, currentMonthKey));
   const repTargetMap = new Map<number, number>();
   repTargets.forEach((t) => repTargetMap.set(t.salesRepId, t.targetRate));
+  const repTargetFinancialMap = new Map<number, number>();
+  repTargets.forEach((t) => repTargetFinancialMap.set(t.salesRepId, Number(t.targetFinancialAmount || 0)));
+
+  const allProposals = await db.select().from(proposals);
+  const toMonthKey = (value: Date | string | null | undefined) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
+  const repQuotedFinancialMap = new Map<number, number>();
+  allProposals.forEach((p) => {
+    const repId = p.createdByRepId;
+    if (!repId) return;
+    const pMonthKey = toMonthKey(p.createdAt);
+    if (pMonthKey === currentMonthKey) {
+      const current = repQuotedFinancialMap.get(repId) || 0;
+      repQuotedFinancialMap.set(repId, current + Number(p.creditValue || 0));
+    }
+  });
 
   const stageCounts: Record<string, number> = {};
   const stateCounts: Record<string, number> = {};
@@ -685,6 +709,8 @@ export async function getDashboardStats(viewRepId?: number) {
     qualifiedLeads: repCounts[r.id]?.qualified || 0,
     closedDeals: repCounts[r.id]?.closed || 0,
     targetRate: repTargetMap.get(r.id) ?? 0,
+    targetFinancialAmount: repTargetFinancialMap.get(r.id) ?? 0,
+    actualFinancialAmount: repQuotedFinancialMap.get(r.id) ?? 0,
     targetMonthKey: currentMonthKey,
   }));
 
@@ -695,17 +721,13 @@ export async function getDashboardStats(viewRepId?: number) {
     qualifiedLeads: r.qualifiedLeads,
     closedDeals: r.closedDeals,
     targetRate: repTargetMap.get(r.id) ?? 0,
+    targetFinancialAmount: repTargetFinancialMap.get(r.id) ?? 0,
+    actualFinancialAmount: repQuotedFinancialMap.get(r.id) ?? 0,
     targetMonthKey: currentMonthKey,
     conversionRate: r.assignedContacts > 0 ? Math.round((r.closedDeals / r.assignedContacts) * 100) : 0,
     qualificationRate: r.assignedContacts > 0 ? Math.round((r.qualifiedLeads / r.assignedContacts) * 100) : 0,
   }));
 
-  const toMonthKey = (value: Date | string | null | undefined) => {
-    if (!value) return null;
-    const date = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(date.getTime())) return null;
-    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-  };
   const monthNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   const monthWindows = Array.from({ length: 6 }, (_, index) => {
     const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (5 - index), 1));
