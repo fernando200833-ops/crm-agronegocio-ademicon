@@ -552,7 +552,9 @@ export async function getDashboardStats(viewRepId?: number) {
       pendingTasks: 0,
       recentInteractions: [],
       repStats: [],
+      repConversionStats: [],
       segmentStats: [],
+      monthlyStats: [],
     };
   }
 
@@ -633,6 +635,59 @@ export async function getDashboardStats(viewRepId?: number) {
     closedDeals: repCounts[r.id]?.closed || 0,
   }));
 
+  const repConversionStats = repStats.map((r) => ({
+    id: r.id,
+    name: r.name,
+    assignedContacts: r.assignedContacts,
+    qualifiedLeads: r.qualifiedLeads,
+    closedDeals: r.closedDeals,
+    conversionRate: r.assignedContacts > 0 ? Math.round((r.closedDeals / r.assignedContacts) * 100) : 0,
+    qualificationRate: r.assignedContacts > 0 ? Math.round((r.qualifiedLeads / r.assignedContacts) * 100) : 0,
+  }));
+
+  const toMonthKey = (value: Date | string | null | undefined) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
+  const monthNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const now = new Date();
+  const monthWindows = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (5 - index), 1));
+    const key = toMonthKey(date)!;
+    return { key, label: `${monthNames[date.getUTCMonth()]}/${String(date.getUTCFullYear()).slice(-2)}` };
+  });
+  const monthBuckets: Record<string, { newLeads: number; closedDeals: number }> = {};
+  monthWindows.forEach(({ key }) => {
+    monthBuckets[key] = { newLeads: 0, closedDeals: 0 };
+  });
+
+  all.forEach((c) => {
+    const createdKey = toMonthKey(c.createdAt);
+    if (createdKey && monthBuckets[createdKey]) {
+      monthBuckets[createdKey].newLeads += 1;
+    }
+    const closedKey = c.pipelineStage === "fechado" ? toMonthKey(c.updatedAt) : null;
+    if (closedKey && monthBuckets[closedKey]) {
+      monthBuckets[closedKey].closedDeals += 1;
+    }
+  });
+
+  let cumulativeLeads = 0;
+  const monthlyStats = monthWindows.map(({ key, label }) => {
+    const bucket = monthBuckets[key];
+    cumulativeLeads += bucket.newLeads;
+    return {
+      key,
+      label,
+      newLeads: bucket.newLeads,
+      closedDeals: bucket.closedDeals,
+      cumulativeLeads,
+      conversionRate: bucket.newLeads > 0 ? Math.round((bucket.closedDeals / bucket.newLeads) * 100) : 0,
+    };
+  });
+
   const segmentStats = Object.entries(segMap).map(([name, data]) => ({
     name,
     total: data.total,
@@ -651,6 +706,8 @@ export async function getDashboardStats(viewRepId?: number) {
     pendingTasks: pending.length,
     recentInteractions: recentInt,
     repStats,
+    repConversionStats,
     segmentStats,
+    monthlyStats,
   };
 }

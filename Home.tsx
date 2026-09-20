@@ -47,11 +47,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
+  ComposedChart,
   Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
+  Line,
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
@@ -279,6 +277,17 @@ export default function Home() {
       .sort((a, b) => b.value - a.value);
   }, [statsQuery.data?.leadTypeCounts]);
 
+  const repConversionChartData = useMemo(() => {
+    return (statsQuery.data?.repConversionStats || []).map((rep) => ({
+      ...rep,
+      shortName: rep.name.length > 24 ? `${rep.name.slice(0, 24)}…` : rep.name,
+    }));
+  }, [statsQuery.data?.repConversionStats]);
+
+  const monthlyEvolutionChartData = useMemo(() => {
+    return statsQuery.data?.monthlyStats || [];
+  }, [statsQuery.data?.monthlyStats]);
+
   const handleStateChartClick = (payload: { name?: string }) => {
     if (!payload.name) return;
     setStateFilter(payload.name);
@@ -295,6 +304,17 @@ export default function Home() {
     setStateFilter('all');
     setActiveTab('contacts');
     toast.success(`Filtro aplicado: ${payload.name}`);
+  };
+
+  const handleRepChartClick = (payload: { id?: number }) => {
+    if (!payload.id) return;
+    setActiveRepView(String(payload.id));
+    setStateFilter('all');
+    setLeadBatchFilter('all');
+    setLeadTypeFilter('all');
+    setStageFilter('all');
+    setActiveTab('contacts');
+    toast.success('Carteira do consultor selecionada');
   };
 
   // Iniciar conversa direta no WhatsApp
@@ -843,6 +863,126 @@ export default function Home() {
                         <div className="h-[280px] flex items-center justify-center text-sm text-[#5C727D]">Carregando tipos de negócio...</div>
                       )}
                     </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Gráficos de Conversão e Evolução */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <UserCheck className="w-5 h-5 text-[#88B04B]" /> Conversão por Consultor
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Percentual de contratos fechados sobre a carteira atribuída. Clique em uma barra para abrir a carteira do consultor.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        {repConversionChartData.length} consultores
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {repConversionChartData.length > 0 ? (
+                      <div className="w-full overflow-x-auto">
+                        <BarChart
+                          width={560}
+                          height={320}
+                          data={repConversionChartData}
+                          layout="vertical"
+                          margin={{ top: 8, right: 30, left: 8, bottom: 8 }}
+                          barCategoryGap={14}
+                          onClick={(data: any) => {
+                            const id = data?.activePayload?.[0]?.payload?.id;
+                            handleRepChartClick({ id });
+                          }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E7E2D8" />
+                          <XAxis
+                            type="number"
+                            domain={[0, 100]}
+                            allowDecimals={false}
+                            tickFormatter={(value) => `${value}%`}
+                            tick={{ fill: '#5C727D', fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="shortName"
+                            width={150}
+                            tick={{ fill: '#1A3643', fontSize: 11, fontWeight: 600 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <RechartsTooltip
+                            cursor={{ fill: '#F5F2EB' }}
+                            contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                            formatter={(value: any, name: any) => {
+                              if (name === 'Conversão') return [`${value}%`, 'Conversão'];
+                              return [value, name];
+                            }}
+                            labelFormatter={(_, payload) => payload?.[0]?.payload?.name || ''}
+                          />
+                          <Bar dataKey="conversionRate" name="Conversão" fill="#1B4D3E" radius={[0, 6, 6, 0]} barSize={22} cursor="pointer" />
+                        </BarChart>
+                      </div>
+                    ) : (
+                      <div className="h-[320px] rounded-lg border border-dashed border-[#D1CCC1] bg-[#F5F2EB]/40 flex flex-col items-center justify-center text-center px-6">
+                        <UserPlus className="w-8 h-8 text-[#88B04B] mb-3" />
+                        <p className="font-bold text-[#1B4D3E]">Nenhum consultor cadastrado</p>
+                        <p className="text-xs text-[#5C727D] mt-1 max-w-sm">Cadastre membros em “Equipe Comercial” e atribua as carteiras para acompanhar a conversão individual.</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border-[#D1CCC1]">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                          <TrendingUp className="w-5 h-5 text-[#88B04B]" /> Evolução Mensal
+                        </CardTitle>
+                        <CardDescription className="text-xs text-[#5C727D] mt-1">
+                          Novos leads, fechamentos e crescimento acumulado da base nos últimos seis meses.
+                        </CardDescription>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-[#EBE6DB] text-[#1B4D3E] border-[#D1CCC1]">
+                        6 meses
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {monthlyEvolutionChartData.length > 0 ? (
+                      <div className="w-full overflow-x-auto">
+                        <ComposedChart
+                          width={560}
+                          height={320}
+                          data={monthlyEvolutionChartData}
+                          margin={{ top: 8, right: 18, left: 0, bottom: 8 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E7E2D8" />
+                          <XAxis dataKey="label" tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis yAxisId="left" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fill: '#5C727D', fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <RechartsTooltip
+                            contentStyle={{ borderRadius: 10, border: '1px solid #D1CCC1', backgroundColor: '#FFFFFF', color: '#1A3643' }}
+                            formatter={(value: any, name: any) => [value, name]}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 11, color: '#1A3643' }} />
+                          <Bar yAxisId="left" dataKey="newLeads" name="Novos leads" fill="#88B04B" radius={[5, 5, 0, 0]} barSize={24} />
+                          <Line yAxisId="left" type="monotone" dataKey="closedDeals" name="Fechados" stroke="#D39B39" strokeWidth={3} dot={{ r: 4, fill: '#D39B39' }} />
+                          <Line yAxisId="right" type="monotone" dataKey="cumulativeLeads" name="Base acumulada" stroke="#1B4D3E" strokeWidth={3} dot={{ r: 4, fill: '#1B4D3E' }} />
+                        </ComposedChart>
+                      </div>
+                    ) : (
+                      <div className="h-[320px] flex items-center justify-center text-sm text-[#5C727D]">Carregando evolução mensal...</div>
+                    )}
+                    <p className="text-[11px] text-[#5C727D] mt-1">Fechamentos usam o mês da última atualização do lead enquanto o CRM não possui uma data de fechamento dedicada.</p>
                   </CardContent>
                 </Card>
               </div>
