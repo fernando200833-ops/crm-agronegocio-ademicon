@@ -55,6 +55,8 @@ export type InsertSalesRepMonthlyTarget = typeof salesRepMonthlyTargets.$inferIn
 
 export const contacts = mysqlTable("contacts", {
   id: int("id").autoincrement().primaryKey(),
+  clientType: mysqlEnum("clientType", ["pf", "pj"]).default("pj").notNull(),
+  taxId: varchar("taxId", { length: 32 }),
   state: varchar("state", { length: 64 }).notNull(),
   city: varchar("city", { length: 120 }).notNull(),
   organization: varchar("organization", { length: 255 }).notNull(),
@@ -142,6 +144,8 @@ export const reminderSettings = mysqlTable("reminderSettings", {
   recipientEmail: varchar("recipientEmail", { length: 320 }),
   webhookUrl: text("webhookUrl"),
   enabled: boolean("enabled").default(false).notNull(),
+  targetAlertEnabled: boolean("targetAlertEnabled").default(false).notNull(),
+  targetAlertThreshold: int("targetAlertThreshold").default(100).notNull(),
   scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
   lastRunAt: timestamp("lastRunAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -150,6 +154,21 @@ export const reminderSettings = mysqlTable("reminderSettings", {
 
 export type ReminderSettings = typeof reminderSettings.$inferSelect;
 export type InsertReminderSettings = typeof reminderSettings.$inferInsert;
+
+export const targetAchievementAlerts = mysqlTable("targetAchievementAlerts", {
+  id: int("id").autoincrement().primaryKey(),
+  salesRepId: int("salesRepId").notNull(),
+  monthKey: varchar("monthKey", { length: 7 }).notNull(),
+  targetAmount: decimal("targetAmount", { precision: 14, scale: 2 }).notNull(),
+  achievedAmount: decimal("achievedAmount", { precision: 14, scale: 2 }).notNull(),
+  sentAt: timestamp("sentAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  salesRepMonthUnique: uniqueIndex("targetAchievementAlerts_salesRepId_monthKey_unique").on(table.salesRepId, table.monthKey),
+}));
+
+export type TargetAchievementAlert = typeof targetAchievementAlerts.$inferSelect;
+export type InsertTargetAchievementAlert = typeof targetAchievementAlerts.$inferInsert;
 
 export const proposals = mysqlTable("proposals", {
   id: int("id").autoincrement().primaryKey(),
