@@ -366,6 +366,38 @@ export const appRouter = router({
       return await db.getSalesReps();
     }),
 
+    listMonthlyTargets: protectedProcedure
+      .input(z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional())
+      .query(async ({ input }) => {
+        return await db.getSalesRepMonthlyTargets(input?.monthKey);
+      }),
+
+    setMonthlyTarget: adminProcedure
+      .input(
+        z.object({
+          salesRepId: z.number(),
+          monthKey: z.string().regex(/^\d{4}-\d{2}$/, "Mês inválido. Formato esperado: AAAA-MM"),
+          targetRate: z.number().min(0).max(100),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const target = await db.setSalesRepMonthlyTarget({
+          salesRepId: input.salesRepId,
+          monthKey: input.monthKey,
+          targetRate: input.targetRate,
+          createdByUserId: ctx.user.id,
+        });
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          action: "crm.set_monthly_target",
+          entityType: "salesRepMonthlyTargets",
+          entityId: input.salesRepId,
+          ipAddress: getClientIp(ctx.req),
+          metadata: JSON.stringify(input),
+        });
+        return target;
+      }),
+
     createRep: adminProcedure
       .input(
         z.object({
@@ -396,6 +428,8 @@ export const appRouter = router({
             temperature: z.string().optional(),
             priority: z.string().optional(),
             assignedRepId: z.number().optional(),
+            leadType: z.string().optional(),
+            leadBatch: z.string().optional(),
           })
           .optional()
       )
@@ -445,6 +479,10 @@ export const appRouter = router({
               sourceUrl: z.string(),
               verificationNote: z.string(),
               interestAsset: z.string().optional(),
+              leadType: z.string().optional(),
+              leadSource: z.string().optional(),
+              leadBatch: z.string().optional(),
+              leadKey: z.string().optional(),
             })
           ),
         })

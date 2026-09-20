@@ -8,6 +8,7 @@ import {
   tasks,
   messageTemplates,
   salesReps,
+  salesRepMonthlyTargets,
   reminderSettings,
   proposals,
   passwordResetTokens,
@@ -22,6 +23,8 @@ import {
   InsertMessageTemplate,
   SalesRep,
   InsertSalesRep,
+  SalesRepMonthlyTarget,
+  InsertSalesRepMonthlyTarget,
   ReminderSettings,
   InsertReminderSettings,
   Proposal,
@@ -364,7 +367,14 @@ export async function getSalesReps() {
 export async function createSalesRep(data: InsertSalesRep) {
   const db = await getDb();
   if (!db) return undefined;
-  return await db.insert(salesReps).values(data);
+  const res = await db.insert(salesReps).values(data);
+  const insertId = (res as any)[0]?.insertId;
+  if (insertId) {
+    const rows = await db.select().from(salesReps).where(eq(salesReps.id, insertId)).limit(1);
+    return rows[0];
+  }
+  const rows = await db.select().from(salesReps).where(eq(salesReps.name, data.name)).orderBy(desc(salesReps.id)).limit(1);
+  return rows[0];
 }
 
 export async function assignContactRep(contactId: number, repId: number | null) {
@@ -381,6 +391,42 @@ export async function bulkAssignContacts(contactIds: number[], repId: number | n
     await db.update(contacts).set({ assignedRepId: repId }).where(eq(contacts.id, id));
   }
   return { count: contactIds.length };
+}
+
+export async function getSalesRepMonthlyTargets(monthKey?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const targetMonth = monthKey || `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`;
+  return await db.select().from(salesRepMonthlyTargets).where(eq(salesRepMonthlyTargets.monthKey, targetMonth));
+}
+
+export async function setSalesRepMonthlyTarget(data: {
+  salesRepId: number;
+  monthKey: string;
+  targetRate: number;
+  createdByUserId?: number | null;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const boundedTarget = Math.max(0, Math.min(100, Math.round(data.targetRate)));
+  await db.insert(salesRepMonthlyTargets).values({
+    salesRepId: data.salesRepId,
+    monthKey: data.monthKey,
+    targetRate: boundedTarget,
+    createdByUserId: data.createdByUserId || null,
+  }).onDuplicateKeyUpdate({
+    set: {
+      targetRate: boundedTarget,
+      createdByUserId: data.createdByUserId || null,
+      updatedAt: new Date(),
+    },
+  });
+  const rows = await db
+    .select()
+    .from(salesRepMonthlyTargets)
+    .where(and(eq(salesRepMonthlyTargets.salesRepId, data.salesRepId), eq(salesRepMonthlyTargets.monthKey, data.monthKey)))
+    .limit(1);
+  return rows[0];
 }
 
 // Proposals History
@@ -566,6 +612,11 @@ export async function getDashboardStats(viewRepId?: number) {
   const pending = await db.select().from(tasks).where(eq(tasks.completed, false));
   const recentInt = await db.select().from(interactions).orderBy(desc(interactions.createdAt)).limit(5);
   const reps = await db.select().from(salesReps);
+  const now = new Date();
+  const currentMonthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const repTargets = await db.select().from(salesRepMonthlyTargets).where(eq(salesRepMonthlyTargets.monthKey, currentMonthKey));
+  const repTargetMap = new Map<number, number>();
+  repTargets.forEach((t) => repTargetMap.set(t.salesRepId, t.targetRate));
 
   const stageCounts: Record<string, number> = {};
   const stateCounts: Record<string, number> = {};
@@ -633,6 +684,8 @@ export async function getDashboardStats(viewRepId?: number) {
     assignedContacts: repCounts[r.id]?.assigned || 0,
     qualifiedLeads: repCounts[r.id]?.qualified || 0,
     closedDeals: repCounts[r.id]?.closed || 0,
+    targetRate: repTargetMap.get(r.id) ?? 0,
+    targetMonthKey: currentMonthKey,
   }));
 
   const repConversionStats = repStats.map((r) => ({
@@ -641,6 +694,8 @@ export async function getDashboardStats(viewRepId?: number) {
     assignedContacts: r.assignedContacts,
     qualifiedLeads: r.qualifiedLeads,
     closedDeals: r.closedDeals,
+    targetRate: repTargetMap.get(r.id) ?? 0,
+    targetMonthKey: currentMonthKey,
     conversionRate: r.assignedContacts > 0 ? Math.round((r.closedDeals / r.assignedContacts) * 100) : 0,
     qualificationRate: r.assignedContacts > 0 ? Math.round((r.qualifiedLeads / r.assignedContacts) * 100) : 0,
   }));
@@ -652,7 +707,6 @@ export async function getDashboardStats(viewRepId?: number) {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
   };
   const monthNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-  const now = new Date();
   const monthWindows = Array.from({ length: 6 }, (_, index) => {
     const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (5 - index), 1));
     const key = toMonthKey(date)!;

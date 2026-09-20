@@ -178,4 +178,55 @@ describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
     expect(usinas.length).toBeGreaterThan(0);
     expect(usinas.every(l => l.leadType === "Usina Sucroenergética")).toBe(true);
   });
+
+  it("deve permitir que o administrador defina metas mensais por consultor e reflita no agregado de conversão", async () => {
+    const adminUser = {
+      id: 501,
+      openId: "target_admin",
+      email: "gestor.metas@ademicon.agro",
+      name: "Gestor de Metas",
+      loginMethod: "password",
+      role: "admin" as const,
+      salesRepId: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      passwordHash: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
+    const { ctx: adminCtx } = createMockContext(adminUser);
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const rep = await adminCaller.crm.createRep({
+      name: "Consultor de Alta Performance",
+      email: "performance@ademicon.agro",
+      phone: "(34) 99888-7766",
+    });
+    expect(rep).toBeDefined();
+
+    const now = new Date();
+    const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+
+    // Cadastrar meta mensal de 25% para o consultor
+    const target = await adminCaller.crm.setMonthlyTarget({
+      salesRepId: (rep as any).id,
+      monthKey,
+      targetRate: 25,
+    });
+    expect(target).toBeDefined();
+    expect(target?.targetRate).toBe(25);
+
+    // Consulta de metas mensais
+    const targetList = await adminCaller.crm.listMonthlyTargets({ monthKey });
+    expect(targetList.some((t) => t.salesRepId === (rep as any).id && t.targetRate === 25)).toBe(true);
+
+    // Estatísticas do dashboard devem trazer a meta integrada ao consultor
+    const stats = await adminCaller.crm.stats({});
+    const repStats = stats.repConversionStats.find((r) => r.id === (rep as any).id);
+    expect(repStats).toBeDefined();
+    expect(repStats?.targetRate).toBe(25);
+  });
 });
