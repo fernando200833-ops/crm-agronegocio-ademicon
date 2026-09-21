@@ -85,6 +85,97 @@
       "when": 1789879245957,
       "tag": "0011_flimsy_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1789881298128,
+      "tag": "0012_oval_eternity",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1789882050962,
+      "tag": "0013_purple_vector",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1789882501598,
+      "tag": "0014_low_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1789882760144,
+      "tag": "0015_salty_celestials",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1789885621884,
+      "tag": "0016_bright_ozymandias",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1789886051095,
+      "tag": "0017_magical_junta",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1789886481179,
+      "tag": "0018_mushy_karen_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1789888235110,
+      "tag": "0019_romantic_sinister_six",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1789989493317,
+      "tag": "0020_faithful_nemesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1789990908885,
+      "tag": "0021_deep_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1789991395973,
+      "tag": "0022_acoustic_silver_sable",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1789991945965,
+      "tag": "0023_wonderful_lucky_pierre",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1790014974042,
+      "tag": "0024_narrow_riptide",
+      "breakpoints": true
     }
   ]
 }
