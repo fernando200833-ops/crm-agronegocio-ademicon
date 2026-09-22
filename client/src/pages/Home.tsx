@@ -65,7 +65,9 @@ import {
   FileSearch,
   GitMerge,
   DatabaseZap,
-  AlertTriangle
+  AlertTriangle,
+  Mail,
+  CheckCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -227,6 +229,7 @@ export default function Home() {
   const [newClientState, setNewClientState] = useState('Minas Gerais');
   const [newClientCity, setNewClientCity] = useState('');
   const [newClientPhone, setNewClientPhone] = useState('');
+  const [newClientEmail, setNewClientEmail] = useState('');
   const [newClientActivity, setNewClientActivity] = useState('');
   const [newClientSegment, setNewClientSegment] = useState('Grãos e Cereais');
   const [newClientAsset, setNewClientAsset] = useState('Tratores, Colheitadeiras e Implementos');
@@ -1241,6 +1244,7 @@ export default function Home() {
           activity: row['Atividade'] || row['atividade'] || 'Produção Agropecuária',
           phone: String(row['Telefone'] || row['telefone'] || row['Contato'] || ''),
           formattedPhone: String(row['Telefone'] || row['telefone'] || row['Contato'] || ''),
+          email: (row['E-mail'] || row['e-mail'] || row['Email'] || row['email']) ? String(row['E-mail'] || row['e-mail'] || row['Email'] || row['email']).trim() : undefined,
           sourceUrl: row['Fonte'] || row['fonte'] || 'Importação Manual de Planilha',
           verificationNote: row['Nota'] || row['nota'] || 'Contato importado via planilha CSV/XLSX',
           interestAsset: row['Interesse'] || row['interesse'] || 'Consórcio de Máquinas / Equipamentos',
@@ -1620,6 +1624,47 @@ export default function Home() {
                   <span className="text-[11px] text-[#5C727D] block mt-1">Dígitos fora do padrão nacional</span>
                 </div>
               </div>
+
+              {/* Barra de Progresso de Qualidade Global */}
+              {(() => {
+                const q = (statsQuery.data as any)?.dataQuality;
+                if (!q) return null;
+                return (
+                  <div className="bg-white p-4 rounded-xl border border-[#D1CCC1] shadow-xs space-y-3">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-[#1B4D3E] flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-[#88B04B]" /> Índice Geral de Confiabilidade da Base
+                      </span>
+                      <span className="text-xs font-semibold text-[#5C727D]">
+                        {q.totalContacts} contatos monitorados
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                      <div className="p-3 rounded-lg bg-[#F5F2EB]/60 border border-[#D1CCC1]/60">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-[#1B4D3E]">Telefones Validados</span>
+                          <Badge className="bg-emerald-600 text-white text-[10px]">{q.validPhonePercentage}%</Badge>
+                        </div>
+                        <span className="text-[11px] text-[#5C727D]">{q.validPhoneCount} registros com contato telefônico pronto para abordagem</span>
+                      </div>
+                      <div className="p-3 rounded-lg bg-[#F5F2EB]/60 border border-[#D1CCC1]/60">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-[#1B4D3E]">E-mails Validados</span>
+                          <Badge className="bg-sky-600 text-white text-[10px]">{q.validEmailPercentage}%</Badge>
+                        </div>
+                        <span className="text-[11px] text-[#5C727D]">{q.validEmailCount} cadastros com endereço eletrônico corporativo</span>
+                      </div>
+                      <div className="p-3 rounded-lg bg-[#F5F2EB]/60 border border-[#D1CCC1]/60">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-[#1B4D3E]">Localização Completa</span>
+                          <Badge className="bg-amber-600 text-white text-[10px]">{q.validLocationPercentage}%</Badge>
+                        </div>
+                        <span className="text-[11px] text-[#5C727D]">{q.validLocationCount} leads com polo produtivo e estado mapeados</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Filtros da Central */}
               <div className="flex flex-wrap items-center gap-2">
@@ -2305,6 +2350,145 @@ export default function Home() {
                   </CardContent>
                 </Card>
               </div>
+
+              {/* PAINEL DE MÉTRICAS DE QUALIDADE DE DADOS */}
+              {(() => {
+                const q = (statsQuery.data as any)?.dataQuality;
+                if (!q) return null;
+                return (
+                  <Card className="bg-white border-[#D1CCC1] shadow-xs">
+                    <CardHeader className="pb-3 border-b border-[#D1CCC1]/50">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                        <div>
+                          <CardTitle className="text-lg font-bold text-[#1B4D3E] flex items-center gap-2">
+                            <ShieldCheck className="w-5 h-5 text-[#88B04B]" /> Painel de Qualidade de Dados Cadastrais
+                          </CardTitle>
+                          <CardDescription className="text-xs text-[#5C727D] mt-0.5">
+                            Acompanhamento em tempo real da higienização, integridade e enriquecimento dos contatos agro
+                            {activeRep ? ` da carteira de ${activeRep.name}` : ' em toda a base nacional'}.
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge className="bg-[#1B4D3E] text-[#88B04B] font-bold text-xs py-1 px-3">
+                            Total Analisado: {q.totalContacts} leads
+                          </Badge>
+                          {meQuery.data?.role === 'admin' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-[#1B4D3E] text-[#1B4D3E] hover:bg-[#F5F2EB] text-xs font-semibold h-8"
+                              onClick={() => setActiveTab('sanitization')}
+                            >
+                              <GitMerge className="w-3.5 h-3.5 mr-1" /> Central de Saneamento
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* Telefones Validados */}
+                        <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-[#1B4D3E] flex items-center gap-1.5">
+                              <PhoneCall className="w-4 h-4 text-emerald-700" /> Telefones Validados
+                            </span>
+                            <Badge className="bg-emerald-600 text-white font-extrabold text-[11px] px-2">
+                              {q.validPhonePercentage}%
+                            </Badge>
+                          </div>
+                          <div className="w-full bg-emerald-200/60 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-emerald-600 h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${q.validPhonePercentage}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] text-[#5C727D] pt-0.5">
+                            <span>{q.validPhoneCount} de {q.totalContacts} contatos</span>
+                            <span className="font-semibold text-emerald-900">DDD + Dígitos válidos</span>
+                          </div>
+                        </div>
+
+                        {/* E-mails Corporativos/Comerciais */}
+                        <div className="p-3.5 rounded-xl border border-sky-200 bg-sky-50/40 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-[#1B4D3E] flex items-center gap-1.5">
+                              <Mail className="w-4 h-4 text-sky-700" /> E-mails Validados
+                            </span>
+                            <Badge className="bg-sky-600 text-white font-extrabold text-[11px] px-2">
+                              {q.validEmailPercentage}%
+                            </Badge>
+                          </div>
+                          <div className="w-full bg-sky-200/60 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-sky-600 h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${q.validEmailPercentage}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] text-[#5C727D] pt-0.5">
+                            <span>{q.validEmailCount} de {q.totalContacts} contatos</span>
+                            <span className="font-semibold text-sky-900">Sintaxe RFC confirmada</span>
+                          </div>
+                        </div>
+
+                        {/* Localização Validada */}
+                        <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-[#1B4D3E] flex items-center gap-1.5">
+                              <MapPin className="w-4 h-4 text-amber-700" /> Localizações Validadas
+                            </span>
+                            <Badge className="bg-amber-600 text-white font-extrabold text-[11px] px-2">
+                              {q.validLocationPercentage}%
+                            </Badge>
+                          </div>
+                          <div className="w-full bg-amber-200/60 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-amber-600 h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${q.validLocationPercentage}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] text-[#5C727D] pt-0.5">
+                            <span>{q.validLocationCount} de {q.totalContacts} contatos</span>
+                            <span className="font-semibold text-amber-900">Município & UF ativos</span>
+                          </div>
+                        </div>
+
+                        {/* Cadastros 100% Completos */}
+                        <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-[#1B4D3E] flex items-center gap-1.5">
+                              <CheckCheck className="w-4 h-4 text-indigo-700" /> Perfil Triplo Completo
+                            </span>
+                            <Badge className="bg-indigo-600 text-white font-extrabold text-[11px] px-2">
+                              {q.completeProfilePercentage}%
+                            </Badge>
+                          </div>
+                          <div className="w-full bg-indigo-200/60 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${q.completeProfilePercentage}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] text-[#5C727D] pt-0.5">
+                            <span>{q.completeProfileCount} de {q.totalContacts} contatos</span>
+                            <span className="font-semibold text-indigo-900">Tel + E-mail + UF</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Nota de rodapé da qualidade */}
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-2 border-t border-[#D1CCC1]/40 text-[11px] text-[#5C727D]">
+                        <p>
+                          A validação exige número telefônico com DDD oficial e dígitos nacionais válidos; e-mails validados seguem padrão RFC; localizações exigem município específico e unidade federativa cadastrada.
+                        </p>
+                        <span className="font-semibold text-[#1B4D3E] shrink-0">
+                          {q.validPhonePercentage === 100 && q.validLocationPercentage === 100 ? '✓ Excelente precisão geográfica e telefônica' : 'Higienização recomendada'}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
               {/* Gráficos Interativos de Distribuição */}
               <div className="space-y-6">
@@ -4860,6 +5044,17 @@ export default function Home() {
               </div>
 
               <div>
+                <label className="font-bold text-[#5C727D] block mb-1">E-mail Comercial / Produtor</label>
+                <Input
+                  type="email"
+                  placeholder="contato@fazenda.com.br"
+                  value={newClientEmail}
+                  onChange={(e) => setNewClientEmail(e.target.value)}
+                  className="bg-[#F5F2EB]/60 border-[#D1CCC1]"
+                />
+              </div>
+
+              <div>
                 <label className="font-bold text-[#5C727D] block mb-1">Estado (UF) *</label>
                 <select
                   value={newClientState}
@@ -4951,6 +5146,7 @@ export default function Home() {
                     state: newClientState,
                     city: newClientCity,
                     phone: newClientPhone,
+                    email: newClientEmail.trim() || undefined,
                     activity: newClientActivity,
                     segment: newClientSegment,
                     interestAsset: newClientAsset || undefined,
