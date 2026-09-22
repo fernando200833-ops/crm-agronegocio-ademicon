@@ -176,6 +176,13 @@
       "when": 1790014974042,
       "tag": "0024_narrow_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1790038088764,
+      "tag": "0025_moaning_wrecker",
+      "breakpoints": true
     }
   ]
 }
