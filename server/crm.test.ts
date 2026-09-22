@@ -905,5 +905,40 @@ describe("Expansão Nacional de Leads Agro (183 Leads em 27 UFs)", () => {
     const primaryDetailsAfterMerge = await caller.crm.getContact({ id: primaryContact.id });
     expect(primaryDetailsAfterMerge?.interactions.some((i) => i.summary.includes("Santa Helena"))).toBe(true);
     expect(primaryDetailsAfterMerge?.contact.observation).toContain("testar preservação de histórico");
+
+    // 36. Testar Painel de Métricas de Qualidade de Dados (Telefones, E-mails e Localizações Validadas)
+    const qualityDashboardStats = await caller.crm.stats({});
+    expect(qualityDashboardStats.dataQuality).toBeDefined();
+    expect(typeof qualityDashboardStats.dataQuality.totalContacts).toBe("number");
+    expect(qualityDashboardStats.dataQuality.totalContacts).toBeGreaterThan(0);
+    expect(typeof qualityDashboardStats.dataQuality.validPhoneCount).toBe("number");
+    expect(typeof qualityDashboardStats.dataQuality.validPhonePercentage).toBe("number");
+    expect(qualityDashboardStats.dataQuality.validPhonePercentage).toBeGreaterThanOrEqual(95);
+    expect(typeof qualityDashboardStats.dataQuality.validEmailCount).toBe("number");
+    expect(typeof qualityDashboardStats.dataQuality.validEmailPercentage).toBe("number");
+    expect(typeof qualityDashboardStats.dataQuality.validLocationCount).toBe("number");
+    expect(typeof qualityDashboardStats.dataQuality.validLocationPercentage).toBe("number");
+    expect(qualityDashboardStats.dataQuality.validLocationPercentage).toBeGreaterThanOrEqual(95);
+    expect(typeof qualityDashboardStats.dataQuality.completeProfileCount).toBe("number");
+    expect(typeof qualityDashboardStats.dataQuality.completeProfilePercentage).toBe("number");
+
+    // Cadastrar cliente com e-mail corporativo válido e verificar incremento nas métricas
+    const qualityEmailTest = "contato.diretoria@agroalvorada.agr.br";
+    await caller.crm.createManualContact({
+      organization: "Fazenda Nova Alvorada Agro",
+      clientType: "pj",
+      taxId: "88.999.111/0001-33",
+      state: "Goiás",
+      city: "Rio Verde",
+      phone: "(64) 99333-2211",
+      email: qualityEmailTest,
+      activity: "Produção de milho e soja irrigados.",
+      segment: "Grãos e Cereais",
+      interestAsset: "Colheitadeiras Axiais",
+    });
+
+    const statsAfterEmail = await caller.crm.stats({});
+    expect(statsAfterEmail.dataQuality.validEmailCount).toBeGreaterThan(0);
+    expect(statsAfterEmail.dataQuality.validEmailPercentage).toBeGreaterThanOrEqual(0);
   }, 90000);
 });

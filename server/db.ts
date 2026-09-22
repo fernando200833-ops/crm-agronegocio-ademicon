@@ -1565,6 +1565,54 @@ export async function getDashboardStats(viewRepId?: number) {
       }),
     recentInteractions: recentInt,
     repStats,
+    dataQuality: (() => {
+      const total = all.length;
+      if (total === 0) {
+        return {
+          totalContacts: 0,
+          validPhoneCount: 0,
+          validPhonePercentage: 0,
+          validEmailCount: 0,
+          validEmailPercentage: 0,
+          validLocationCount: 0,
+          validLocationPercentage: 0,
+          completeProfileCount: 0,
+          completeProfilePercentage: 0,
+        };
+      }
+
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      const phonePattern = /(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?(?:9\s?)?\d{4}[-.\s]?\d{4}|0800\s?\d{3}\s?\d{4}/g;
+
+      let validPhoneCount = 0;
+      let validEmailCount = 0;
+      let validLocationCount = 0;
+      let completeProfileCount = 0;
+
+      all.forEach((c) => {
+        const digits = (c.phone || "").replace(/\D/g, "");
+        const phoneOk = (digits.length >= 10 && digits.length <= 13) || Boolean(c.phone && c.phone.match(phonePattern));
+        const emailOk = Boolean(c.email && emailRegex.test(c.email.trim()));
+        const locationOk = Boolean(c.city && c.city.trim() !== "" && !["não informada", "nao informada", "indefinido"].includes(c.city.trim().toLowerCase()) && c.state && c.state.trim() !== "");
+
+        if (phoneOk) validPhoneCount++;
+        if (emailOk) validEmailCount++;
+        if (locationOk) validLocationCount++;
+        if (phoneOk && emailOk && locationOk) completeProfileCount++;
+      });
+
+      return {
+        totalContacts: total,
+        validPhoneCount,
+        validPhonePercentage: Math.round((validPhoneCount / total) * 100),
+        validEmailCount,
+        validEmailPercentage: Math.round((validEmailCount / total) * 100),
+        validLocationCount,
+        validLocationPercentage: Math.round((validLocationCount / total) * 100),
+        completeProfileCount,
+        completeProfilePercentage: Math.round((completeProfileCount / total) * 100),
+      };
+    })(),
     repConversionStats,
     interestTagByRep,
     segmentStats,
@@ -1579,6 +1627,7 @@ export async function createManualContact(data: {
   state: string;
   city: string;
   phone: string;
+  email?: string;
   formattedPhone?: string;
   channelType?: string;
   activity: string;
@@ -1599,10 +1648,11 @@ export async function createManualContact(data: {
     clientType: data.clientType,
     taxId: data.taxId || null,
     state: data.state,
-    city: data.city,
-    phone: data.phone,
-    formattedPhone: data.formattedPhone || data.phone,
-    channelType: data.channelType || "Telefone / WhatsApp",
+  city: data.city,
+  phone: data.phone,
+  email: data.email || null,
+  formattedPhone: data.formattedPhone || data.phone,
+  channelType: data.channelType || "Telefone / WhatsApp",
     activity: data.activity,
     segment: data.segment,
     interestAsset: data.interestAsset || "Tratores, Colheitadeiras e Implementos",
