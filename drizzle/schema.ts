@@ -64,6 +64,7 @@ export const contacts = mysqlTable("contacts", {
   activity: text("activity").notNull(),
   phone: text("phone").notNull(),
   formattedPhone: text("formattedPhone").notNull(),
+  email: varchar("email", { length: 320 }),
   address: text("address"),
   channelType: varchar("channelType", { length: 120 }).default("Canal Comercial Público"),
   sourceUrl: text("sourceUrl").notNull(),
